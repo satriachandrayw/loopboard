@@ -39,6 +39,12 @@ from typing import Literal  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator  # noqa: E402
 
 
+def _http_url(v):
+    if v is not None and not v.startswith(("http://", "https://")):
+        raise ValueError("url must start with http:// or https://")
+    return v
+
+
 class ItemIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +62,8 @@ class ItemIn(BaseModel):
     last_activity_at: str
     merged_at: str | None = None
     live_at: str | None = None
+
+    _url = field_validator("url")(_http_url)
 
     @field_validator("last_activity_at", "merged_at", "live_at")
     @classmethod
@@ -103,6 +111,8 @@ class EpicIn(BaseModel):
     plan_url: str | None = Field(default=None, max_length=500)
     manual_column: Literal[EPIC_MANUAL_COLUMNS] = "backlog"  # type: ignore[valid-type]
 
+    _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
+
     @model_validator(mode="after")
     def _waiting(self):
         if self.manual_column != "canceled" and not self.waiting_on:
@@ -123,6 +133,8 @@ class EpicPatch(BaseModel):
     spec_url: str | None = Field(default=None, max_length=500)
     plan_url: str | None = Field(default=None, max_length=500)
     manual_column: Literal[EPIC_MANUAL_COLUMNS] | None = None  # type: ignore[valid-type]
+
+    _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
 
 
 class FilingIn(BaseModel):

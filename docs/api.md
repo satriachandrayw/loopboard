@@ -22,7 +22,7 @@ explicit offset or `Z`; a naive timestamp is 422. Request bodies reject unknown 
 Body: `{"source": "kanban", "items": [Item, ...]}`, at most 100 items. `source` matches
 `^[a-z][a-z0-9_-]{1,31}$`. An `Item` has `external_id`, `title`, `status_category`
 (`backlog|todo|in_progress|blocked|review|done|canceled`), `last_activity_at`, and optionally
-`url`, `raw_status`, `owner`, `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`;
+`url` (http:// or https:// only), `raw_status`, `owner`, `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`;
 required on open items), `blocked_reason` (`needs_input|other`), `next_step`, `project_key`,
 `epic_key`, `merged_at`, `live_at`. Absent `epic_key` leaves the item's filing unchanged.
 
@@ -77,7 +77,7 @@ key exists.
 ### POST /api/projects/{project_key}/epics
 
 Body: `{"title", "goal"?, "stage"? (idea|spec|plan|build|review|ship), "owner"?, "next_step"?,
-"waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`.
+"waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`. URL fields accept only `http://` or `https://` (else 422).
 `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`) is required unless
 `manual_column` is `canceled` (422 otherwise). Epic keys are `<PROJECT>-E<n>`, numbered per
 project from 1. 201, 404 unknown project.

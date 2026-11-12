@@ -293,3 +293,15 @@ async def test_put_source_rejects_trailing_newline_name(make_app, client_for):
     app, _, h = await setup(make_app)
     r = await req(client_for, app, h, "PUT", "/api/sources/kanban%0A", {"stall_hours": 6})
     assert r.status_code == 422
+
+
+async def test_epic_urls_must_be_http_or_https(make_app, client_for):
+    app, _, h = await seeded(make_app, client_for)
+    for field in ("home_url", "spec_url", "plan_url"):
+        for bad in ("javascript:alert(1)", "data:text/html,x", "ftp://x/y", "//x/y"):
+            r = await mk_epic(client_for, app, h, **{field: bad})
+            assert r.status_code == 422, (field, bad)
+            r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {field: bad})
+            assert r.status_code == 422, (field, bad)
+    ok = await mk_epic(client_for, app, h, home_url="https://a.example/x", spec_url="http://a.example/y")
+    assert ok.status_code == 201
