@@ -98,9 +98,7 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
     items: list[Item] = []
     listings: dict[str, list[dict]] = {}
     for repo, project in repos.items():
-        prs = fetch_json(f"{API}/repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=50")
-        if not isinstance(prs, list):
-            raise SourceError("unexpected GitHub response")
+        prs = _fetch_pulls(fetch_json, repo, cutoff)
         listings[repo] = prs
         for pr in prs:
             try:
@@ -186,6 +184,27 @@ def _iso(ts: int) -> str:
 
 MAX_PAGES = 20
 PER_PAGE = 100
+
+
+def _fetch_pulls(fetch_json, repo: str, cutoff: float) -> list[dict]:
+    """Pages the pulls listing (updated desc) until a page is empty or short, or ends before the cutoff."""
+    url = f"{API}/repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page={PER_PAGE}"
+    prs: list[dict] = []
+    seen: set = set()
+    for page in range(1, MAX_PAGES + 1):
+        batch = fetch_json(f"{url}&page={page}")
+        if not isinstance(batch, list):
+            raise SourceError("unexpected GitHub response")
+        try:
+            for pr in batch:
+                if pr["number"] not in seen:  # a PR updated mid-run can move onto a later page
+                    seen.add(pr["number"])
+                    prs.append(pr)
+            if len(batch) < PER_PAGE or _epoch(batch[-1]["updated_at"]) < cutoff:
+                return prs
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise SourceError("unexpected GitHub response") from None
+    raise SourceError("too many pull requests to fetch")
 
 
 def _fetch_check_runs(fetch_json, url: str) -> dict:

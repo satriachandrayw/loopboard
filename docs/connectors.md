@@ -64,7 +64,7 @@ instance until board-qualified ids are added.
 loopboard sync github --config PATH [--dry-run]
 ```
 
-Lists the 50 most recently updated pull requests per repo in `[github.repos]`, skips those not updated within `lookback_days` (default 14), and posts them as source `github`. The GitHub token comes from the variable named by `[github] token_env`; the Loopboard token from `[loopboard] token_env`. Neither is printed. `[github.agents]` maps a PR author login to an agent name; `[github.live_branches]` lists, per repo, base branches whose merges are live.
+Lists the pull requests of each repo in `[github.repos]`, most recently updated first, skips those not updated within `lookback_days` (default 14), and posts them as source `github`. The listing is paged (`per_page=100`, `page=1, 2, …`) until a page is empty or shorter than 100, or the last PR on a page was updated before the cutoff (`now - lookback_days`). A repo that would need more than 20 pages (2,000 PRs) fails the run, which posts nothing. The GitHub token comes from the variable named by `[github] token_env`; the Loopboard token from `[loopboard] token_env`. Neither is printed. `[github.agents]` maps a PR author login to an agent name; `[github.live_branches]` lists, per repo, base branches whose merges are live.
 
 | PR state | Column | waiting_on |
 |---|---|---|
@@ -81,6 +81,8 @@ Lists the 50 most recently updated pull requests per repo in `[github.repos]`, s
 Failing checks win over pending, pending over changes requested. Reviews decide only the changes-requested rule, using each reviewer's latest non-comment review. A merge into a branch not listed stays in Review until a live branch contains it or the item is marked deployed.
 
 Releases (D23a): for each merged PR whose base is not a live branch, that has a `merge_commit_sha` and was merged within `lookback_days`, the connector asks `GET /repos/{repo}/compare/{merge_commit_sha}...{live_branch}`. A `status` of `ahead` or `identical` means the live branch contains the PR. Its `live_at` is then the `merged_at` of the earliest PR in the same listing merged into a live branch at or after the PR's own `merged_at` (the release PR, for example `development → main`), or the run time if the listing has none; `merged_at` is kept. A run makes at most 60 compare calls, oldest merged-not-live PRs first; the rest wait for a later run. A 404 or 422 from compare (for example a deleted commit) counts as not contained. Any other compare error fails the run, which posts nothing.
+
+API budget: per repo, one listing call per page, plus check-runs and reviews (each paged at 100) only for open, non-draft PRs; drafts, merged and closed PRs need neither, since their column and `waiting_on` do not depend on checks or reviews. Add at most 60 compare calls per run. A repo with 164 PRs in the window, 8 of them open and ready, takes 2 + 8 + 8 = 18 calls; ten such repos take about 180, plus up to 60 compare calls, per 15-minute run.
 
 Requests send `User-Agent: loopboard-connectors/<version>`, since Cloudflare's Browser Integrity Check rejects the default `Python-urllib` agent (error 1010). Titles are cut at 300 characters.
 

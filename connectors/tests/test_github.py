@@ -468,3 +468,123 @@ def test_no_release_pr_found_uses_run_time():
 def test_github_http_error_is_a_source_error_with_status():
     e = github.GitHubHTTPError(404)
     assert isinstance(e, SourceError) and e.status == 404 and "404" in str(e)
+
+
+# Pagination of the pulls listing (v1a.3)
+
+PAGED = "https://api.github.com/repos/owner/busy"
+
+
+def _iso_at(ts):
+    return github._iso(ts)
+
+
+def _pr(n, updated, state="closed", merged=True, draft=False):
+    return {"number": n, "title": f"PR {n}", "state": state, "draft": draft,
+            "merged_at": _iso_at(updated) if state == "closed" and merged else None,
+            "merge_commit_sha": f"m{n}", "html_url": f"https://github.com/owner/busy/pull/{n}",
+            "updated_at": _iso_at(updated), "user": {"login": "builder-bot"},
+            "head": {"sha": f"h{n}"}, "base": {"ref": "main"}}
+
+
+def paged_fetch(prs, seen, per_page=100):
+    """Serves `prs` (already sorted updated desc) as GitHub would, 100 per page; records every URL."""
+    def f(url):
+        seen.append(url)
+        if url.startswith(PAGED + "/pulls?"):
+            q = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&"))
+            assert q["per_page"] == "100" and q["sort"] == "updated" and q["direction"] == "desc", url
+            page = int(q.get("page", "1"))
+            return prs[(page - 1) * per_page: page * per_page]
+        if "/check-runs" in url:
+            return {"total_count": 0, "check_runs": []}
+        if "/reviews" in url:
+            return []
+        raise AssertionError(url)
+    return f
+
+
+def paged_collect(fetch, lookback=14):
+    items = github.collect(fetch, repos={"owner/busy": "BUSY"}, human="owner", agent_logins=AGENTS,
+                           live_branches={}, lookback_days=lookback, now=NOW)
+    return {i.external_id: i for i in items}
+
+
+def _listing_calls(seen):
+    return [u for u in seen if u.startswith(PAGED + "/pulls?")]
+
+
+def test_pages_until_older_than_cutoff():
+    cutoff = NOW - 14 * 86400
+    # pages 1-2 inside the window; page 3 crosses the cutoff halfway; page 4 would be all old
+    prs = [_pr(1000 - k, NOW - 60 - k * 3000) for k in range(250)]
+    prs += [_pr(500 - k, cutoff - 3600 - k * 60) for k in range(150)]
+    assert _epoch_ok(prs)
+    seen = []
+    items = paged_collect(paged_fetch(prs, seen))
+    calls = _listing_calls(seen)
+    assert len(calls) == 3 and calls[2].endswith("&page=3"), calls
+    assert len(items) == 250  # the old half of page 3 is still filtered out
+
+
+def _epoch_ok(prs):
+    ts = [github._epoch(p["updated_at"]) for p in prs]
+    return ts == sorted(ts, reverse=True)
+
+
+def test_stops_on_empty_page():
+    prs = [_pr(1000 - k, NOW - 60 - k * 60) for k in range(200)]  # exactly two full pages, all recent
+    seen = []
+    items = paged_collect(paged_fetch(prs, seen))
+    calls = _listing_calls(seen)
+    assert len(calls) == 3 and calls[2].endswith("&page=3"), calls  # page 3 is empty
+    assert len(items) == 200
+
+
+def test_page_cap_raises_source_error():
+    seen = []
+
+    def endless(url):
+        seen.append(url)
+        if url.startswith(PAGED + "/pulls?"):
+            return [_pr(k, NOW - 60) for k in range(100)]  # always a full page inside the window
+        raise AssertionError(url)
+    with pytest.raises(SourceError):
+        paged_collect(endless)
+    assert len(_listing_calls(seen)) == github.MAX_PAGES
+
+
+def test_all_prs_within_lookback_collected():
+    prs = [_pr(2000 - k, NOW - 60 - k * 7000) for k in range(164)]  # 164 PRs over ~13.3 days
+    prs += [_pr(100 - k, NOW - 15 * 86400 - k * 60) for k in range(80)]  # older than lookback
+    assert _epoch_ok(prs)
+    seen = []
+    items = paged_collect(paged_fetch(prs, seen))
+    assert len(items) == 164
+    assert len(_listing_calls(seen)) == 2
+
+
+def test_api_call_budget_for_164_pr_repo():
+    # 164 PRs inside the window: 12 open (8 ready, 4 draft), 130 merged, 22 closed unmerged
+    prs = []
+    for k in range(164):
+        ts = NOW - 60 - k * 7000
+        if k < 8:
+            prs.append(_pr(2000 - k, ts, state="open", merged=False))
+        elif k < 12:
+            prs.append(_pr(2000 - k, ts, state="open", merged=False, draft=True))
+        elif k < 142:
+            prs.append(_pr(2000 - k, ts))
+        else:
+            prs.append(_pr(2000 - k, ts, merged=False))
+    prs += [_pr(100 - k, NOW - 15 * 86400 - k * 60) for k in range(80)]
+    seen = []
+    paged_collect(paged_fetch(prs, seen))
+    listing = len(_listing_calls(seen))
+    checks = sum("/check-runs" in u for u in seen)
+    reviews = sum("/reviews" in u for u in seen)
+    # per-PR calls only for open, non-draft PRs; merged/closed PRs need neither (map_pr ignores them)
+    assert (listing, checks, reviews) == (2, 8, 8)
+    assert len(seen) == 18
+    # 10 such repos: 180 calls, plus at most 60 compare calls per run (D23a) -> 240, well under 1,000
+    assert 10 * len(seen) + github.COMPARE_BUDGET < 1000
