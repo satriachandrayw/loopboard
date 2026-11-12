@@ -176,3 +176,66 @@ def test_token_never_in_output(tmp_path, capsys):
 def test_missing_github_token_exits_2(tmp_path, capsys):
     code, out, _ = run(tmp_path, capsys, post=Poster(), env={"LB_TOKEN": TOKEN})
     assert code == 2 and GH_TOKEN not in out
+
+
+def test_cli_rejects_bad_config_types(tmp_path, capsys):
+    p = cfg(tmp_path)
+    p.write_text(p.read_text().replace('["main"]', '"main"'))
+    code = cli.main(["sync", "github", "--config", str(p)],
+                    env={"LB_TOKEN": TOKEN, "GH_TOKEN": GH_TOKEN}, post=Poster(), fetch_json=fake_fetch)
+    out = capsys.readouterr().out
+    assert code == 2 and "live_branches" in out
+
+
+def test_no_checks_or_reviews_fetched_for_draft_closed_merged():
+    seen = []
+
+    def rec(url):
+        seen.append(url)
+        return fake_fetch(url)
+    collect(rec)
+    for n in (1, 5, 6, 7):
+        assert not any(f"sha{n}" in u or f"/pulls/{n}/" in u for u in seen)
+    assert sum("/check-runs" in u for u in seen) == 5  # open non-draft PRs: 2, 3, 4, 8, 10
+
+
+def test_redirect_off_host_raises_and_never_forwards_token():
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen = []
+
+    class Target(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+        def log_message(self, *a):
+            pass
+
+    target = HTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirector(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(301)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/x")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    redir = HTTPServer(("127.0.0.1", 0), Redirector)
+    for srv in (target, redir):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{redir.server_port}/"
+        fetch = github.default_fetch_json(GH_TOKEN, allowed_prefix=base)
+        with pytest.raises(SourceError) as ei:
+            fetch(base + "repos")
+        assert GH_TOKEN not in str(ei.value)
+        assert seen == []
+    finally:
+        target.shutdown()
+        redir.shutdown()

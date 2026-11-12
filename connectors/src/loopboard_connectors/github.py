@@ -102,13 +102,25 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
     return items
 
 
-def default_fetch_json(token: str) -> Callable[[str], Any]:
+class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+    def __init__(self, allowed_prefix: str):
+        self.allowed_prefix = allowed_prefix
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(self.allowed_prefix):
+            raise SourceError("GitHub redirected to an unexpected host")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def default_fetch_json(token: str, *, allowed_prefix: str = API + "/") -> Callable[[str], Any]:
+    opener = urllib.request.build_opener(_SameHostRedirects(allowed_prefix))
+
     def fetch(url: str) -> Any:
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "loopboard-connector"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with opener.open(req, timeout=30) as resp:
                 if resp.status != 200:
                     raise SourceError(f"GitHub returned HTTP {resp.status}")
                 return json.loads(resp.read())

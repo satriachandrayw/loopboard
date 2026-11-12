@@ -75,6 +75,14 @@ def _sync_github(args, env, post, fetch_json, now) -> int:
         repos = gcfg.get("repos", {})
         if not repos:
             raise ConfigError("[github.repos] is empty")
+        agents = gcfg.get("agents", {})
+        live = gcfg.get("live_branches", {})
+        if not all(isinstance(k, str) and isinstance(v, str) for k, v in repos.items()):
+            raise ConfigError("[github.repos] values must be strings")
+        if not all(isinstance(v, str) for v in agents.values()):
+            raise ConfigError("[github.agents] values must be strings")
+        if not all(isinstance(v, list) and all(isinstance(b, str) for b in v) for v in live.values()):
+            raise ConfigError("[github.live_branches] values must be lists of strings")
         lookback = gcfg.get("lookback_days", 14)
         if not isinstance(lookback, int) or isinstance(lookback, bool) or lookback < 1:
             raise ConfigError("[github] lookback_days must be a positive integer")
@@ -85,8 +93,8 @@ def _sync_github(args, env, post, fetch_json, now) -> int:
         fetch_json = github.default_fetch_json(gtoken)
     human = cfg.get("general", {}).get("human", "owner")
     try:
-        items = github.collect(fetch_json, repos=repos, human=human, agent_logins=gcfg.get("agents", {}),
-                               live_branches=gcfg.get("live_branches", {}), lookback_days=lookback,
+        items = github.collect(fetch_json, repos=repos, human=human, agent_logins=agents,
+                               live_branches=live, lookback_days=lookback,
                                now=int(time.time()) if now is None else now)
     except SourceError as e:
         _emit({"connector": "github", "error": _scrub(str(e), token, gtoken)})
