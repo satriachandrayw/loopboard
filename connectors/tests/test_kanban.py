@@ -193,3 +193,23 @@ def test_invalid_assignee_falls_back(bad):
         assert it.waiting_on in (None, "human:owner", "source:kanban")
     t, s = mk("running", assignee=bad)
     assert kanban.map_task(t, s, human="owner", tenants=TENANTS).waiting_on == "source:kanban"
+
+
+def test_subprocess_env_is_minimal(monkeypatch):
+    import subprocess
+
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["env"] = kw.get("env")
+        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+
+    for k, v in {"PATH": "/usr/bin", "HOME": "/h", "LANG": "C", "HERMES_HOME": "/x",
+                 "GITHUB_TOKEN": "gh_secret", "LB_TOKEN": "lb_secret", "OTHER": "o"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    kanban.run_cli_subprocess(["hermes", "kanban", "list", "--json"])
+    env = seen["env"]
+    assert env is not None
+    assert env["PATH"] == "/usr/bin" and env["HERMES_HOME"] == "/x"
+    assert "GITHUB_TOKEN" not in env and "LB_TOKEN" not in env and "OTHER" not in env

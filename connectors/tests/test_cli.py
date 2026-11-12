@@ -132,6 +132,10 @@ def test_token_never_printed(tmp_path, capsys):
         assert TOKEN not in out and TOKEN not in err
     code, out, err = run(tmp_path, capsys, env={})
     assert TOKEN not in out + err
+    ghs = "ghp_supersecretgithub"
+    for post in (Poster(), reject):
+        code, out, err = run(tmp_path, capsys, post=post, env={"LB_TOKEN": TOKEN, "GITHUB_TOKEN": ghs})
+        assert ghs not in out + err and TOKEN not in out + err
 
 
 def test_dry_run_posts_nothing(tmp_path, capsys):

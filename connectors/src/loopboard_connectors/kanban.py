@@ -3,6 +3,7 @@ comments, payload.reason) is never read."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -99,9 +100,15 @@ def collect(run_cli: Callable[[list[str]], str], *, human: str, tenants: dict[st
     return items
 
 
+def _child_env() -> dict[str, str]:
+    """Minimal environment for the hermes child: never Loopboard or GitHub tokens."""
+    return {k: v for k, v in os.environ.items()
+            if k in ("PATH", "HOME", "LANG") or k.startswith("HERMES_")}
+
+
 def run_cli_subprocess(argv: list[str]) -> str:
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=120, env=_child_env())
     except (OSError, subprocess.SubprocessError) as e:
         raise SourceError(f"cannot run {argv[0]}") from None
     if p.returncode != 0:
