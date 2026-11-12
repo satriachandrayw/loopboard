@@ -154,6 +154,41 @@ PY
 then ok "6 /api/board column counts match expected-board.json"; else fail "6 /api/board column counts differ from expected-board.json"; fi
 set -e
 
+# 6b: update an existing item on real D1, then replay an older timestamp (skipped_older).
+set +e
+ING_BASE="$(cd "$ROOT/connectors" && uv run --python 3.13 python - "$ROOT/connectors/tests/fixtures/kanban" <<'PY'
+import json, sys
+from loopboard_connectors import kanban
+items = kanban.collect(kanban.replay_runner(sys.argv[1]), human="owner", tenants={"demo": "DEMO"}, board=None)
+print(json.dumps(items[0].to_payload()))
+PY
+)"
+UPD_ID="$(printf '%s' "$ING_BASE" | jget "d['external_id']" 2>/dev/null)"
+NEW_TITLE="Acceptance updated title"
+ts_ago() { python3 -c "import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=$1)).strftime('%Y-%m-%dT%H:%M:%SZ'))"; }
+ing_post() { # ing_post <last_activity_at> <title> -> response body
+  local body
+  body="$(printf '%s' "$ING_BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['last_activity_at']=sys.argv[1]; d['title']=sys.argv[2]; print(json.dumps({'source':'kanban','items':[d]}))" "$1" "$2")"
+  curl -s -X POST -H "Authorization: Bearer $LB_INGEST_TOKEN" -H 'Content-Type: application/json' -d "$body" "$BASE/api/ingest"
+}
+r="$(ing_post "$(ts_ago 1)" "$NEW_TITLE")"
+[ "$(printf '%s' "$r" | jget "d['updated']" 2>/dev/null)" = 1 ] \
+  && ok "6b ingest update of $UPD_ID -> updated == 1" || fail "6b ingest update -> $r"
+r="$(ing_post "$(ts_ago 120)" "Older title must not win")"
+[ "$(printf '%s' "$r" | jget "d['skipped_older']" 2>/dev/null)" = 1 ] \
+  && ok "6b ingest older timestamp -> skipped_older == 1" || fail "6b ingest older -> $r"
+DETAIL="$(api GET /api/epics/DEMO-E1 | sed '$d')"
+printf '%s' "$DETAIL" >"$TMP/detail.json"
+if python3 - "$TMP/detail.json" "$UPD_ID" "$NEW_TITLE" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+ts = [t for g in d["tasks"].values() for t in g if t["external_id"] == sys.argv[2]]
+assert ts and ts[0]["title"] == sys.argv[3], ts
+assert any(e["kind"] == "item.updated" for e in d["events"]), "no item.updated event"
+PY
+then ok "6b epic detail shows new title and an item.updated event"; else fail "6b epic detail after update"; fi
+set -e
+
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/board")"
 [ "$code" = 401 ] && ok "6 /api/board without token -> 401" || fail "6 /api/board without token -> $code"
 
