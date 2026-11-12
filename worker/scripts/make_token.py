@@ -22,6 +22,10 @@ def main():
     scopes = [x.strip() for x in a.scopes.split(",")]
     if not scopes or not set(scopes) <= {"ingest", "read", "write"}:
         ap.error("scopes must be a comma list of ingest, read, write")
+    if "ingest" in scopes and not a.source:
+        ap.error("ingest tokens must be bound to one source (--source)")
+    if a.source and set(scopes) != {"ingest"}:
+        ap.error("--source is only valid for ingest-only tokens (no read or write)")
     a.scopes = ",".join(scopes)
     token, h = new_token()
     print(f"TOKEN={token}")

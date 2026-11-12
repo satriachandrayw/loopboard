@@ -186,7 +186,7 @@ async def test_access_disabled_ignores_valid_jwt(make_app, client_for):
 def test_make_token_prints_hash_not_token():
     script = Path(__file__).resolve().parents[1] / "scripts" / "make_token.py"
     out = subprocess.run(
-        [sys.executable, str(script), "--name", "bot", "--scopes", "ingest,read", "--source", "kanban"],
+        [sys.executable, str(script), "--name", "bot", "--scopes", "ingest", "--source", "kanban"],
         capture_output=True,
         text=True,
         check=True,
@@ -290,3 +290,19 @@ def test_make_token_rejects_unknown_scope():
     script = Path(__file__).resolve().parents[1] / "scripts" / "make_token.py"
     r = subprocess.run([sys.executable, str(script), "--name", "b", "--scopes", "admin"], capture_output=True, text=True)
     assert r.returncode != 0
+
+
+def _mk(*args):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "make_token.py"
+    return subprocess.run([sys.executable, str(script), "--name", "b", *args], capture_output=True, text=True)
+
+
+def test_make_token_ingest_requires_source():
+    r = _mk("--scopes", "ingest")
+    assert r.returncode != 0 and "TOKEN=" not in r.stdout
+
+
+def test_make_token_source_refused_with_read_or_write():
+    for scopes in ("read", "write", "read,write", "ingest,read"):
+        r = _mk("--scopes", scopes, "--source", "kanban")
+        assert r.returncode != 0 and "TOKEN=" not in r.stdout, scopes
