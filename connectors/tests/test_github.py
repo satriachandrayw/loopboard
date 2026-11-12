@@ -683,3 +683,77 @@ def test_title_prefix_sets_epic_key_and_strips_title():
 def test_title_prefix_stripped_before_truncation():
     i = _pr_titled("[DEMO-E5] " + "x" * 500)
     assert i.epic_key == "DEMO-E5" and i.title == "x" * 300
+
+
+def _flaky_server(responses):
+    """Serve scripted GET responses in order: ("truncated", body) promises more bytes than it
+    sends and closes, (status, body) answers normally. The last entry repeats."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    calls = []
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            kind, body = responses[min(len(calls), len(responses) - 1)]
+            calls.append(self.path)
+            data = json.dumps(body).encode()
+            self.send_response(200 if kind == "truncated" else kind)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data) + (500 if kind == "truncated" else 0)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+            self.wfile.flush()
+            self.close_connection = True
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, calls
+
+
+def test_fetch_retries_a_truncated_response():
+    srv, calls = _flaky_server([("truncated", {"x": 1}), (200, {"ok": True})])
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}/"
+        fetch = github.default_fetch_json(GH_TOKEN, allowed_prefix=base, sleep=lambda s: None)
+        assert fetch(base + "repos") == {"ok": True}
+        assert len(calls) == 2
+    finally:
+        srv.shutdown()
+
+
+def test_fetch_gives_up_with_source_error_after_bounded_retries():
+    srv, calls = _flaky_server([("truncated", {"x": 1})])
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}/"
+        fetch = github.default_fetch_json(GH_TOKEN, allowed_prefix=base, sleep=lambda s: None)
+        with pytest.raises(SourceError) as ei:
+            fetch(base + "repos")
+        assert GH_TOKEN not in str(ei.value)
+        assert len(calls) == github.FETCH_ATTEMPTS
+    finally:
+        srv.shutdown()
+
+
+def test_fetch_retries_github_5xx_but_not_4xx():
+    srv, calls = _flaky_server([(502, {}), (200, {"ok": True})])
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}/"
+        fetch = github.default_fetch_json(GH_TOKEN, allowed_prefix=base, sleep=lambda s: None)
+        assert fetch(base + "a") == {"ok": True}
+        assert len(calls) == 2
+    finally:
+        srv.shutdown()
+    srv, calls = _flaky_server([(404, {})])
+    try:
+        base = f"http://127.0.0.1:{srv.server_port}/"
+        fetch = github.default_fetch_json(GH_TOKEN, allowed_prefix=base, sleep=lambda s: None)
+        with pytest.raises(github.GitHubHTTPError):
+            fetch(base + "b")
+        assert len(calls) == 1
+    finally:
+        srv.shutdown()

@@ -1,7 +1,9 @@
 """GitHub pull request connector (read-only). Mapping rules: D19, D23, D23a, R10."""
 from __future__ import annotations
 
+import http.client
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -252,10 +254,14 @@ class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def default_fetch_json(token: str, *, allowed_prefix: str = API + "/") -> Callable[[str], Any]:
+FETCH_ATTEMPTS = 3  # GETs are idempotent; a dropped connection or a GitHub 5xx is retried
+
+
+def default_fetch_json(token: str, *, allowed_prefix: str = API + "/",
+                       sleep: Callable[[float], None] = time.sleep) -> Callable[[str], Any]:
     opener = urllib.request.build_opener(_SameHostRedirects(allowed_prefix))
 
-    def fetch(url: str) -> Any:
+    def fetch_once(url: str) -> Any:
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": USER_AGENT})
@@ -266,8 +272,26 @@ def default_fetch_json(token: str, *, allowed_prefix: str = API + "/") -> Callab
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
             raise GitHubHTTPError(e.code) from None
-        except (urllib.error.URLError, OSError):
-            raise SourceError("GitHub request failed") from None
+        # http.client.HTTPException covers IncompleteRead (connection dropped mid-body),
+        # which is not an OSError and used to escape as a raw traceback.
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
+            raise _TransientFetchError("GitHub request failed") from None
         except ValueError:
             raise SourceError("GitHub returned invalid JSON") from None
+
+    def fetch(url: str) -> Any:
+        for attempt in range(1, FETCH_ATTEMPTS + 1):
+            try:
+                return fetch_once(url)
+            except _TransientFetchError:
+                if attempt == FETCH_ATTEMPTS:
+                    raise SourceError("GitHub request failed") from None
+            except GitHubHTTPError as e:
+                if e.status < 500 or attempt == FETCH_ATTEMPTS:
+                    raise
+            sleep(2 ** (attempt - 1))
     return fetch
+
+
+class _TransientFetchError(Exception):
+    pass
