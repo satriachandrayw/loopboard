@@ -115,3 +115,30 @@ it('test_401_shows_token_prompt_and_retries_after_save', async () => {
   await waitFor(() => screen.getByText('Backlog'))
   expect(localStorage.getItem('loopboard.token')).toBe('lb_good')
 })
+
+it('test_project_filter_is_debounced', async () => {
+  const f = vi.fn(async (_u: string, _i?: RequestInit) => json(board()))
+  vi.stubGlobal('fetch', f)
+  render(<Board />)
+  await waitFor(() => screen.getByText('Backlog'))
+  await userEvent.type(screen.getByLabelText('Project'), 'DEMO')
+  await waitFor(() => expect(f.mock.calls.some((c) => String(c[0]).includes('project=DEMO'))).toBe(true))
+  const withProject = f.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('project='))
+  expect(withProject).toEqual(['/api/board?project=DEMO'])
+})
+
+it('test_stale_board_response_is_ignored', async () => {
+  let releaseFirst: (r: Response) => void = () => {}
+  const f = vi.fn((u: string) => {
+    if (!u.includes('waiting_on')) return new Promise<Response>((res) => { releaseFirst = res })
+    return Promise.resolve(json(board(0, { todo: [card(2, 'todo')] })))
+  })
+  vi.stubGlobal('fetch', f)
+  render(<Board />)
+  await userEvent.selectOptions(screen.getByLabelText('Waiting on'), 'human')
+  await waitFor(() => screen.getByText('Epic 2'))
+  releaseFirst(json(board(0, { todo: [card(1, 'todo')] })))
+  await new Promise((r) => setTimeout(r, 20))
+  expect(screen.getByText('Epic 2')).toBeTruthy()
+  expect(screen.queryByText('Epic 1')).toBeNull()
+})

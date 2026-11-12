@@ -29,3 +29,12 @@ it('test_401_throws_AuthError', async () => {
   stub(401)
   await expect(apiGet('/api/board')).rejects.toBeInstanceOf(AuthError)
 })
+
+it('test_post_without_body_sends_json', async () => {
+  const f = stub()
+  const { apiPost } = await import('./api')
+  await apiPost('/api/epics/DEMO-E1/confirm-done')
+  const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1]
+  expect(new Headers(init.headers).get('Content-Type')).toBe('application/json')
+  expect(init.body).toBe('{}')
+})

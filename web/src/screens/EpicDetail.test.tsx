@@ -64,3 +64,33 @@ it('test_activity_newest_first', async () => {
   expect(items[0]).toContain('newer')
   expect(items[1]).toContain('older')
 })
+
+it('test_goal_links_and_relations', async () => {
+  const d = detail()
+  Object.assign(d.epic, { goal: 'Ship the thing', home_url: 'https://h.test', spec_url: null, plan_url: 'https://p.test' })
+  Object.assign(d, {
+    relations: [
+      { id: 1, kind: 'blocks', from_type: 'item', from_id: 2, to_type: 'epic', to_id: 9 },
+      { id: 2, kind: 'blocks', from_type: 'epic', from_id: 7, to_type: 'epic', to_id: 1 },
+    ],
+  })
+  vi.stubGlobal('fetch', vi.fn(async () => json(d)))
+  render(<EpicDetail epicKey="DEMO-E1" />)
+  await waitFor(() => screen.getByText('Ship the thing'))
+  for (const [name, href] of [['Home', 'https://h.test'], ['Plan', 'https://p.test']]) {
+    const a = screen.getByRole('link', { name })
+    expect(a.getAttribute('href')).toBe(href)
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('rel')).toBe('noreferrer')
+  }
+  expect(screen.queryByRole('link', { name: 'Spec' })).toBeNull()
+  expect(screen.getByText('T-prog blocks epic #9')).toBeTruthy()
+  expect(screen.getByText('This epic is blocked by epic #7')).toBeTruthy()
+})
+
+it('test_no_relations_section_when_empty', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ ...detail(), relations: [] })))
+  render(<EpicDetail epicKey="DEMO-E1" />)
+  await waitFor(() => screen.getByText('T-todo'))
+  expect(screen.queryByRole('heading', { name: 'Relations' })).toBeNull()
+})

@@ -81,8 +81,24 @@ export interface EpicEvent {
   payload: Record<string, unknown> | null
 }
 
+export interface Relation {
+  id: number
+  kind: 'blocks'
+  from_type: 'epic' | 'item'
+  from_id: number
+  to_type: 'epic' | 'item'
+  to_id: number
+}
+
 export interface EpicDetailResponse {
-  epic: Card & { goal: string | null; next_step: string | null }
+  epic: Card & {
+    goal: string | null
+    next_step: string | null
+    home_url?: string | null
+    spec_url?: string | null
+    plan_url?: string | null
+  }
   tasks: Record<string, Task[]>
+  relations?: Relation[]
   events: EpicEvent[]
 }

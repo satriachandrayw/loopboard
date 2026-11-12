@@ -22,8 +22,13 @@ export default function App() {
   else if (hash === '#/stalled') screen = <Stalled />
   else if (hash === '#/unfiled') screen = <Unfiled />
   else if (hash.startsWith('#/epic/') && hash.length > 7) {
-    const key = decodeURIComponent(hash.slice(7))
-    screen = <EpicDetail key={key} epicKey={key} />
+    let key: string | null = null
+    try {
+      key = decodeURIComponent(hash.slice(7))
+    } catch {
+      key = null // malformed escape: fall back to the board
+    }
+    screen = key ? <EpicDetail key={key} epicKey={key} /> : <Board />
   } else screen = <Board />
   return (
     <>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { apiGet, apiPatch, AuthError } from '../api'
 import Column from '../components/Column'
@@ -6,6 +6,7 @@ import TokenPrompt from '../components/TokenPrompt'
 import type { BoardResponse } from '../types'
 
 const NARROW = '(max-width: 640px)'
+const DEBOUNCE_MS = 300
 
 function useNarrow(): boolean {
   const mq = () => (typeof window.matchMedia === 'function' ? window.matchMedia(NARROW) : null)
@@ -28,21 +29,33 @@ export default function Board() {
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState(0)
   const narrow = useNarrow()
+  // The project text filter is debounced; only the newest request may set state.
+  const [projectQ, setProjectQ] = useState('')
+  const seq = useRef(0)
+
+  useEffect(() => {
+    const t = setTimeout(() => setProjectQ(project.trim()), DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [project])
 
   const load = useCallback(async () => {
     const q = new URLSearchParams()
-    if (project.trim()) q.set('project', project.trim())
+    if (projectQ) q.set('project', projectQ)
     if (waiting) q.set('waiting_on', waiting)
     const qs = q.toString()
+    const n = ++seq.current
     try {
-      setData(await apiGet<BoardResponse>('/api/board' + (qs ? `?${qs}` : '')))
+      const d = await apiGet<BoardResponse>('/api/board' + (qs ? `?${qs}` : ''))
+      if (n !== seq.current) return
+      setData(d)
       setNeedsAuth(false)
       setError(null)
     } catch (e) {
+      if (n !== seq.current) return
       if (e instanceof AuthError) setNeedsAuth(true)
       else setError('Could not load the board.')
     }
-  }, [project, waiting])
+  }, [projectQ, waiting])
 
   useEffect(() => {
     void load()

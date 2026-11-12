@@ -38,3 +38,9 @@ it('test_progress_text_2_of_4', () => {
   expect(screen.getByText('build')).toBeTruthy()
   expect(screen.getByText('DEMO')).toBeTruthy()
 })
+
+it('test_title_links_to_epic_detail', () => {
+  show({ key: 'DEMO-E1', title: 'Linked epic' })
+  const a = screen.getByText('Linked epic').closest('a')!
+  expect(a.getAttribute('href')).toBe('#/epic/DEMO-E1')
+})

@@ -41,7 +41,7 @@ export default function Card({ card, nowSeconds, onMove }: Props) {
         e.dataTransfer?.setData('application/x-loopboard-column', card.column)
       }}
     >
-      <h3>{card.title}</h3>
+      <h3><a href={`#/epic/${encodeURIComponent(card.key)}`}>{card.title}</a></h3>
       <div className="meta">
         <span className="project-tag">{card.project_key}</span>
         {card.stage && <span className="stage">{card.stage}</span>}

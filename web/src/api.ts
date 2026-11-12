@@ -17,6 +17,9 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // Writes always send a JSON body: the API requires application/json on bodiless
+  // POSTs (confirm-done) so a cross-site form cannot ride the Access cookie.
+  if (method !== 'GET' && body === undefined) body = {}
   const headers = new Headers()
   const token = getToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
