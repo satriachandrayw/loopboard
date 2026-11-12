@@ -92,8 +92,8 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
                     continue
                 checks = reviews = []
                 if pr.get("state") == "open" and not pr.get("draft"):
-                    checks = fetch_json(f"{API}/repos/{repo}/commits/{pr['head']['sha']}/check-runs")
-                    reviews = fetch_json(f"{API}/repos/{repo}/pulls/{pr['number']}/reviews")
+                    checks = fetch_json(f"{API}/repos/{repo}/commits/{pr['head']['sha']}/check-runs?per_page=100")
+                    reviews = fetch_json(f"{API}/repos/{repo}/pulls/{pr['number']}/reviews?per_page=100")
                 pr = dict(pr, _repo=repo)
                 items.append(map_pr(pr, checks=checks, reviews=reviews, project_key=project, human=human,
                                     agent_logins=agent_logins, live_branches=live_branches.get(repo, [])))

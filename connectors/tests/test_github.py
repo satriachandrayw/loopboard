@@ -20,7 +20,7 @@ def fake_fetch(url):
     if "/check-runs" in url:
         sha = url.split("/commits/")[1].split("/")[0]
         return json.loads((FIX / f"checks-{sha}.json").read_text())
-    if url.endswith("/reviews"):
+    if "/reviews" in url:
         n = url.split("/pulls/")[1].split("/")[0]
         p = FIX / f"reviews-{n}.json"
         return json.loads(p.read_text()) if p.exists() else []
@@ -197,6 +197,17 @@ def test_no_checks_or_reviews_fetched_for_draft_closed_merged():
     for n in (1, 5, 6, 7):
         assert not any(f"sha{n}" in u or f"/pulls/{n}/" in u for u in seen)
     assert sum("/check-runs" in u for u in seen) == 5  # open non-draft PRs: 2, 3, 4, 8, 10
+
+
+def test_checks_and_reviews_fetch_100_per_page():
+    seen = []
+
+    def rec(url):
+        seen.append(url)
+        return fake_fetch(url)
+    collect(rec)
+    sub = [u for u in seen if "/check-runs" in u or "/reviews" in u]
+    assert sub and all(u.endswith("?per_page=100") for u in sub), sub
 
 
 def test_redirect_off_host_raises_and_never_forwards_token():
