@@ -6,6 +6,10 @@ if [ -e "$LB_TMP" ] && [ ! -O "$LB_TMP" ]; then
   echo "refusing to use $LB_TMP: it is owned by another user" >&2
   exit 1
 fi
+if [ -L "$LB_TMP" ]; then
+  echo "refusing to use $LB_TMP: it is a symlink" >&2
+  exit 1
+fi
 mkdir -p "$LB_TMP"
 chmod 700 "$LB_TMP"
 export UV_CACHE_DIR="$LB_TMP/cache" UV_PYTHON_INSTALL_DIR="$LB_TMP/py" npm_config_cache="$LB_TMP/npm"
