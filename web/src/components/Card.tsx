@@ -1,24 +1,11 @@
-import { useState } from 'react'
+import type { MouseEvent } from 'react'
+import { ageSince, epicHref, FLAG_TEXT, RED_FLAGS, waitKind, who } from '../format'
 import type { Card as CardT } from '../types'
-
-export const FLAG_TEXT: Record<string, string> = {
-  awaiting_approval: 'awaiting your approval',
-  awaiting_confirmation: 'awaiting your confirmation',
-  blocked_needs_input: 'blocked: needs your input',
-  blocked: 'blocked',
-  merged_not_live: 'merged, not live',
-}
+import Menu from './Menu'
 
 const MOVES: Record<string, { label: string; column: string }[]> = {
   backlog: [{ label: 'Todo', column: 'todo' }, { label: 'Canceled', column: 'canceled' }],
   todo: [{ label: 'Backlog', column: 'backlog' }, { label: 'Canceled', column: 'canceled' }],
-}
-
-function waitClass(w: string | null): string {
-  if (w?.startsWith('human:')) return 'wait-human'
-  if (w?.startsWith('agent:')) return 'wait-agent'
-  if (w?.startsWith('source:')) return 'wait-source'
-  return ''
 }
 
 interface Props {
@@ -27,60 +14,62 @@ interface Props {
   onMove: (column: string) => void
 }
 
+function Waiting({ card, nowSeconds }: { card: CardT; nowSeconds: number }) {
+  const age = ageSince(card.waiting_since, nowSeconds)
+  if (card.column === 'backlog') return age ? <span className="wait-parked">{`parked ${age}`}</span> : null
+  if (card.column === 'done') return age ? <span className="wait-done">{`done ${age}`}</span> : null
+  const kind = waitKind(card.waiting_on)
+  if (!kind) return null
+  return (
+    <span className={`wait-${kind}`}>
+      {`${who(card.waiting_on)}${age ? ' · ' : ''}`}
+      {age && (card.stalled ? <span className="stl">{age}</span> : age)}
+    </span>
+  )
+}
+
 export default function Card({ card, nowSeconds, onMove }: Props) {
-  const [open, setOpen] = useState(false)
   const moves = MOVES[card.column] ?? []
-  const hours =
-    card.waiting_since == null ? null : Math.max(0, Math.floor((nowSeconds - card.waiting_since) / 3600))
+  const { done, total } = card.progress
+  const open = (e: MouseEvent) => {
+    // The title link, the Move menu and its items handle their own clicks.
+    if ((e.target as HTMLElement).closest('a, button, [role="menu"]')) return
+    window.location.hash = epicHref(card.key)
+  }
+  const pills = [
+    ...card.flags.map((f) => ({ id: f, text: FLAG_TEXT[f] ?? f.replaceAll('_', ' '), red: RED_FLAGS.has(f) })),
+    ...(card.review_owner ? [{ id: 'review_owner', text: `review · ${card.review_owner === 'human' ? 'you' : 'agent'}`, red: false }] : []),
+  ]
   return (
     <article
-      className={`card${card.stalled ? ' stalled' : ''}`}
+      className={`card${card.stalled ? ' stalled' : ''}${card.column === 'done' ? ' done' : ''}`}
       draggable={card.column === 'backlog'}
+      onClick={open}
       onDragStart={(e) => {
         e.dataTransfer?.setData('text/plain', card.key)
         e.dataTransfer?.setData('application/x-loopboard-column', card.column)
       }}
     >
-      <h3><a href={`#/epic/${encodeURIComponent(card.key)}`}>{card.title}</a></h3>
-      <div className="meta">
-        <span className="project-tag">{card.project_key}</span>
-        {card.stage && <span className="stage">{card.stage}</span>}
-        <span className="progress">{`${card.progress.done}/${card.progress.total}`}</span>
+      <div className="top">
+        <span className="key">{card.key}</span>
+        {card.stage && card.column !== 'done' && <span className="lbl">{card.stage}</span>}
+        <span className="proj">{card.project_key}</span>
       </div>
-      {card.review_owner && (
-        <div className="review-owner">{`review · ${card.review_owner === 'human' ? 'you' : 'agent'}`}</div>
+      <h3 className="ti"><a href={epicHref(card.key)}>{card.title}</a></h3>
+      {total > 0 && (
+        <div className="pb" aria-hidden="true"><i style={{ width: `${Math.round((100 * done) / total)}%` }} /></div>
       )}
-      {card.flags.map((f) => (
-        <div key={f} className={`flag flag-${f}`}>{FLAG_TEXT[f] ?? f}</div>
-      ))}
-      {card.waiting_on && (
-        <div className={`waiting ${waitClass(card.waiting_on)}`}>
-          <span>{card.waiting_on}</span>
-          {hours != null && <span>{`waiting ${hours}h`}</span>}
-        </div>
-      )}
-      {moves.length > 0 && (
-        <div className="move">
-          <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
-            Move
-          </button>
-          {open && (
-            <ul role="menu">
-              {moves.map((m) => (
-                <li key={m.column}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setOpen(false)
-                      onMove(m.column)
-                    }}
-                  >
-                    {m.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
+      <div className="w">
+        <span>{card.column === 'backlog' && total === 0 ? '—' : `${done}/${total}`}</span>
+        <Waiting card={card} nowSeconds={nowSeconds} />
+      </div>
+      {(pills.length > 0 || moves.length > 0) && (
+        <div className="foot">
+          {pills.map((p) => (
+            <span key={p.id} className={`flag flag-${p.id}${p.red ? ' flag-red' : ''}`}>{p.text}</span>
+          ))}
+          {moves.length > 0 && (
+            <Menu label="Move" className="move" items={moves.map((m) => ({ label: m.label, onSelect: () => onMove(m.column) }))} />
           )}
         </div>
       )}

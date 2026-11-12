@@ -94,3 +94,12 @@ it('test_no_relations_section_when_empty', async () => {
   await waitFor(() => screen.getByText('T-todo'))
   expect(screen.queryByRole('heading', { name: 'Relations' })).toBeNull()
 })
+
+it('test_stage_track_marks_past_and_current_stage', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json(detail())))
+  const { container } = render(<EpicDetail epicKey="DEMO-E1" />)
+  await waitFor(() => screen.getByText('T-todo'))
+  const segs = [...container.querySelectorAll('.stage span')].map((s) => s.className)
+  expect(segs).toEqual(['d', 'd', 'd', 'c', '', '', ''])
+  expect(screen.getByLabelText('Stage: build')).toBeTruthy()
+})

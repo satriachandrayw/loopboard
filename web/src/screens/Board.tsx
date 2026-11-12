@@ -2,45 +2,53 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { apiGet, apiPatch, AuthError } from '../api'
 import Column from '../components/Column'
+import NewEpicForm from '../components/NewEpicForm'
+import ProjectChips from '../components/ProjectChips'
 import TokenPrompt from '../components/TokenPrompt'
-import type { BoardResponse } from '../types'
+import { announceChange, epicHref, isOpenItem, nowSeconds } from '../format'
+import { useProject, useProjects, withProject } from '../project'
+import { useNarrow } from '../useNarrow'
+import type { BoardResponse, UnfiledRow } from '../types'
 
-const NARROW = '(max-width: 640px)'
-const DEBOUNCE_MS = 300
-
-function useNarrow(): boolean {
-  const mq = () => (typeof window.matchMedia === 'function' ? window.matchMedia(NARROW) : null)
-  const [narrow, setNarrow] = useState(() => mq()?.matches ?? false)
+function EmptyBoard({ project, onNew }: { project: string; onNew: () => void }) {
+  const [open, setOpen] = useState<number | null>(null)
   useEffect(() => {
-    const m = mq()
-    if (!m) return
-    const h = () => setNarrow(m.matches)
-    m.addEventListener?.('change', h)
-    return () => m.removeEventListener?.('change', h)
-  }, [])
-  return narrow
+    let live = true
+    apiGet<UnfiledRow[]>(withProject('/api/unfiled', project))
+      .then((rows) => { if (live && Array.isArray(rows)) setOpen(rows.filter(isOpenItem).length) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [project])
+  return (
+    <section className="empty panel">
+      <h1 className="t">No epics yet</h1>
+      <p className="s">
+        {open == null ? 'Counting unfiled items…' : `${open} open unfiled ${open === 1 ? 'item' : 'items'} waiting to be filed.`}
+      </p>
+      <div className="btns">
+        <a className="btn" href="#/unfiled">File them →</a>
+        <button type="button" className="btn g" onClick={onNew}>+ New epic</button>
+      </div>
+    </section>
+  )
 }
 
 export default function Board() {
-  const [project, setProject] = useState('')
+  const [project] = useProject()
+  const projects = useProjects()
   const [waiting, setWaiting] = useState('')
   const [data, setData] = useState<BoardResponse | null>(null)
   const [needsAuth, setNeedsAuth] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState(0)
+  const [creating, setCreating] = useState(false)
   const narrow = useNarrow()
-  // The project text filter is debounced; only the newest request may set state.
-  const [projectQ, setProjectQ] = useState('')
+  // Only the newest request may set state.
   const seq = useRef(0)
-
-  useEffect(() => {
-    const t = setTimeout(() => setProjectQ(project.trim()), DEBOUNCE_MS)
-    return () => clearTimeout(t)
-  }, [project])
 
   const load = useCallback(async () => {
     const q = new URLSearchParams()
-    if (projectQ) q.set('project', projectQ)
+    if (project) q.set('project', project)
     if (waiting) q.set('waiting_on', waiting)
     const qs = q.toString()
     const n = ++seq.current
@@ -55,7 +63,7 @@ export default function Board() {
       if (e instanceof AuthError) setNeedsAuth(true)
       else setError('Could not load the board.')
     }
-  }, [projectQ, waiting])
+  }, [project, waiting])
 
   useEffect(() => {
     void load()
@@ -63,8 +71,9 @@ export default function Board() {
 
   const move = async (key: string, column: string) => {
     try {
-      await apiPatch(`/api/epics/${key}`, { manual_column: column })
+      await apiPatch(`/api/epics/${encodeURIComponent(key)}`, { manual_column: column })
       await load()
+      announceChange()
     } catch (e) {
       if (e instanceof AuthError) setNeedsAuth(true)
       else setError('Move failed.')
@@ -80,42 +89,61 @@ export default function Board() {
 
   if (needsAuth) return <TokenPrompt onSaved={() => void load()} />
 
-  const nowSeconds = Math.floor(Date.now() / 1000)
-  const cols = data?.columns ?? []
+  const now = nowSeconds()
+  const cols = Array.isArray(data?.columns) ? data.columns : []
+  const empty = data != null && !waiting && cols.every((c) => c.count === 0)
   const shown = narrow ? cols.slice(tab, tab + 1) : cols
 
   return (
-    <main className="board">
+    <main className="screen board">
+      {narrow && <div className="top"><h1 className="t">Board</h1></div>}
       <div className="filters">
-        <label>
-          Project
-          <input value={project} onChange={(e) => setProject(e.target.value)} />
-        </label>
-        <label>
-          Waiting on
-          <select value={waiting} onChange={(e) => setWaiting(e.target.value)}>
-            <option value="">any</option>
-            <option value="agent">agent</option>
-            <option value="human">human</option>
-            <option value="source">source</option>
+        <ProjectChips projects={projects} />
+        <label className="chip select">
+          <span>Waiting on:</span>
+          <select aria-label="Waiting on" value={waiting} onChange={(e) => setWaiting(e.target.value)}>
+            <option value="">anyone</option>
+            <option value="human">you</option>
+            <option value="agent">an agent</option>
+            <option value="source">a source</option>
           </select>
         </label>
+        <button type="button" className="btn" onClick={() => setCreating(true)}>+ New epic</button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      {narrow && (
-        <div role="tablist" className="tabs">
-          {cols.map((c, i) => (
-            <button key={c.column} role="tab" aria-selected={i === tab} onClick={() => setTab(i)}>
-              {c.label}
-            </button>
-          ))}
-        </div>
+      {empty ? (
+        <EmptyBoard project={project} onNew={() => setCreating(true)} />
+      ) : (
+        <>
+          {narrow && (
+            <div role="tablist" className="stabs">
+              {cols.map((c, i) => (
+                <button key={c.column} type="button" role="tab" aria-selected={i === tab}
+                  className={i === tab ? 'on' : undefined} onClick={() => setTab(i)}>
+                  {`${c.label} ${c.count}`}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="columns">
+            {shown.map((c) => (
+              <Column key={c.column} data={c} nowSeconds={now} onMove={move} onDropCard={dropOn(c.column)} />
+            ))}
+          </div>
+        </>
       )}
-      <div className="columns">
-        {shown.map((c) => (
-          <Column key={c.column} data={c} nowSeconds={nowSeconds} onMove={move} onDropCard={dropOn(c.column)} />
-        ))}
-      </div>
+      {creating && (
+        <NewEpicForm
+          projects={projects}
+          initialProject={project}
+          onCancel={() => setCreating(false)}
+          onCreated={(key) => {
+            setCreating(false)
+            announceChange()
+            window.location.hash = epicHref(key)
+          }}
+        />
+      )}
     </main>
   )
 }

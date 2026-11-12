@@ -1,5 +1,6 @@
 import type { DragEvent } from 'react'
 import type { ColumnData } from '../types'
+import { COLUMN_RULES, REVIEW_LIMIT } from '../format'
 import Card from './Card'
 
 interface Props {
@@ -17,10 +18,17 @@ export default function Column({ data, nowSeconds, onMove, onDropCard }: Props) 
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDropCard}
     >
-      <h2>
-        {data.label} <span className="count">{data.count}</span>
+      <h2 className="colh">
+        <span>{data.label}</span>
+        {data.column === 'review' ? (
+          <span className={`limit${data.warn ? ' warn' : ''}`} title={data.warn ? 'Review is backing up' : undefined}>
+            {`${data.count} / ${REVIEW_LIMIT} limit`}
+          </span>
+        ) : (
+          <span className="count">{data.count}</span>
+        )}
       </h2>
-      {data.warn && <div className="warn-text">Review is backing up</div>}
+      {COLUMN_RULES[data.column] && <p className="rule">{COLUMN_RULES[data.column]}</p>}
       {data.cards.map((c) => (
         <Card key={c.key} card={c} nowSeconds={nowSeconds} onMove={(col) => onMove(c.key, col)} />
       ))}

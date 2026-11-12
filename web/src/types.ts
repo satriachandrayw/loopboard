@@ -50,6 +50,8 @@ export interface StalledRow {
   waiting_group: WaitingGroup
   waiting_since: number | null
   stalled_for_hours: number
+  source?: string
+  external_id?: string
 }
 
 export interface UnfiledRow {
@@ -61,6 +63,18 @@ export interface UnfiledRow {
   owner: string | null
   waiting_on: string | null
   last_activity_at: number
+  project_key: string | null
+  status_category: string
+  category: string
+  merged_at: number | null
+  live_at: number | null
+}
+
+export interface Project {
+  id: number
+  key: string
+  name: string
+  created_at: number
 }
 
 export interface Task {
@@ -70,6 +84,7 @@ export interface Task {
   url: string | null
   waiting_on: string | null
   category: string
+  source?: string
 }
 
 export interface EpicEvent {

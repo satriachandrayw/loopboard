@@ -13,12 +13,12 @@ export default function TokenPrompt({ onSaved }: { onSaved: () => void }) {
         onSaved()
       }}
     >
-      <p>Enter your Loopboard token to continue.</p>
+      <p className="s">Enter your Loopboard token to continue.</p>
       <label>
         Token
         <input type="password" value={value} onChange={(e) => setValue(e.target.value)} />
       </label>
-      <button type="submit">Save</button>
+      <button type="submit" className="btn">Save</button>
     </form>
   )
 }
