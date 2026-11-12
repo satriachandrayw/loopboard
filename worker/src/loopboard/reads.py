@@ -3,7 +3,7 @@ import json
 
 from .derive import derive_epic, effective_category, open_items
 from .model import OPEN_CATEGORIES, REVIEW_WARN_AT
-from .stall import epic_stalled, item_stalled
+from .stall import ITEMS_FOR_STALL, epic_stalled, item_stalled, stall_eligible
 
 COLUMNS = (("backlog", "Backlog"), ("todo", "Todo"), ("in_progress", "In progress"),
            ("review", "Review"), ("done", "Done"))
@@ -128,8 +128,8 @@ async def stalled(repo, *, now, waiting_on=None) -> list[dict]:
         d = derive_epic(e, items, now)
         if epic_stalled(e, items, d, now, th):
             add("epic", e["id"], e["key"], e["title"], e["waiting_on"], _waiting_since(e, items), {})
-    for i in await repo.query("select * from items where filing in ('epic', 'standalone')"):
-        if item_stalled(i, now, th):
+    for i in await repo.query(ITEMS_FOR_STALL):
+        if stall_eligible(i) and item_stalled(i, now, th):
             add("item", i["id"], item_ref(i), i["title"], i["waiting_on"], i["last_activity_at"],
                 {"url": i["url"], "source": i["source"], "external_id": i["external_id"]})
     return sorted(rows, key=lambda r: (r["waiting_since"], r["kind"], r["id"]))

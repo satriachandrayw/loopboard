@@ -77,17 +77,22 @@ key exists.
 ### POST /api/projects/{project_key}/epics
 
 Body: `{"title", "goal"?, "stage"? (idea|spec|plan|build|review|ship), "owner"?, "next_step"?,
-"waiting_on"?, "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`.
-Epic keys are `<PROJECT>-E<n>`, numbered per project from 1. 201, 404 unknown project.
+"waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`.
+`waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`) is required unless
+`manual_column` is `canceled` (422 otherwise). Epic keys are `<PROJECT>-E<n>`, numbered per
+project from 1. 201, 404 unknown project.
 
 ### PATCH /api/epics/{key}
 
 Body: any of the epic fields above; null is rejected for fields that cannot be null and an empty
-body is 422. 200, 404 unknown epic. Agents never set a column other than backlog, todo or canceled.
+body is 422. `waiting_on` cannot be set to null, and a canceled epic cannot be reopened without
+one, unless the epic stays canceled (422). 200, 404 unknown epic. Agents never set a column other than backlog, todo or canceled.
 
 ### POST /api/epics/{key}/confirm-done
 
-No body. A human confirms an epic without code is done. 200, 404 unknown epic.
+No body, but the request must carry `Content-Type: application/json` (415 otherwise), so a
+cross-site form cannot post it with the Access cookie. A human confirms an epic without code is
+done. 200, 404 unknown epic.
 
 ### POST /api/items/{item_id}/filing
 

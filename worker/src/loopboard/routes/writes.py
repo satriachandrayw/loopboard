@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from loopboard import writes
 from loopboard.app import get_now, get_repo
@@ -40,8 +40,13 @@ async def patch_epic(key: str, body: EpicPatch, p: Principal = require("write"),
 
 
 @router.post("/api/epics/{key}/confirm-done")
-async def confirm_done(key: str, p: Principal = require("write"),
+async def confirm_done(key: str, request: Request, p: Principal = require("write"),
                        repo=Depends(get_repo), now: int = Depends(get_now)):
+    # No body, so require a JSON content type: a cross-site HTML form cannot send one
+    # without a CORS preflight, so the Access cookie cannot be ridden here (CSRF).
+    ctype = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if ctype != "application/json":
+        raise HTTPException(415, "Content-Type must be application/json")
     return await _run(writes.confirm_done(repo, key=key, actor=p.name, now=now))
 
 

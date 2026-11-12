@@ -1,5 +1,5 @@
 """Shared constants and timestamp parsing."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 CATEGORIES = ("backlog", "todo", "in_progress", "blocked", "review", "done", "canceled")
 OPEN_CATEGORIES = ("backlog", "todo", "in_progress", "blocked", "review")
@@ -27,7 +27,10 @@ def parse_ts(value: str) -> int:
         raise ValidationError(f"invalid timestamp: {value!r}") from e
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValidationError("timestamp needs an explicit offset or Z")
-    return int(dt.timestamp())
+    try:
+        return int(dt.astimezone(timezone.utc).timestamp())
+    except (OverflowError, OSError, ValueError) as e:
+        raise ValidationError(f"timestamp out of range: {value!r}") from e
 
 
 # --- ingest payload models (pydantic) ---
@@ -99,6 +102,12 @@ class EpicIn(BaseModel):
     spec_url: str | None = Field(default=None, max_length=500)
     plan_url: str | None = Field(default=None, max_length=500)
     manual_column: Literal[EPIC_MANUAL_COLUMNS] = "backlog"  # type: ignore[valid-type]
+
+    @model_validator(mode="after")
+    def _waiting(self):
+        if self.manual_column != "canceled" and not self.waiting_on:
+            raise ValidationError("waiting_on is required unless the epic is canceled")
+        return self
 
 
 class EpicPatch(BaseModel):

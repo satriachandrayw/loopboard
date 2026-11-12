@@ -14,3 +14,10 @@ async def test_every_api_route_requires_credentials(make_app, client_for):
             for m in r.methods - {"HEAD", "OPTIONS"}:
                 resp = await c.request(m, path, json={})
                 assert resp.status_code == 401, (m, r.path)
+
+
+async def test_no_openapi_or_docs_routes(make_app, client_for):
+    app, _ = make_app()
+    async with client_for(app) as c:
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            assert (await c.get(path)).status_code == 404, path

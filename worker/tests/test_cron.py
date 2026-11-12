@@ -39,3 +39,12 @@ async def test_cron_skips_unfiled_items(repo):
     await mk_item(repo, "1", None, "todo", filing="unfiled", last=NOW - 100 * H)
     assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 0}
     assert await kinds(repo) == []
+
+
+async def test_cron_skips_items_of_canceled_epic_and_clears_stalled(repo):
+    e = await mk_epic(repo, manual="canceled", board="canceled")
+    i = await mk_item(repo, "1", e, "in_progress", last=NOW - 100 * H)
+    assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 0}
+    await repo.execute("update items set stalled_since=? where id=?", (NOW - H, i))
+    assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 1}
+    assert (await repo.first("select stalled_since from items where id=?", (i,)))["stalled_since"] is None

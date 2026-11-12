@@ -21,6 +21,7 @@ async def mk_project(client_for, app, h, key="DEMO"):
 
 
 async def mk_epic(client_for, app, h, title="E", project="DEMO", **kw):
+    kw.setdefault("waiting_on", "agent:a")
     return await req(client_for, app, h, "POST", f"/api/projects/{project}/epics", {"title": title, **kw})
 
 
@@ -100,7 +101,7 @@ async def test_every_write_records_actor_and_via(make_app, client_for):
     a = await add_item(repo, "1", epic_id=eid, filing="epic", merged=1)
     b = await add_item(repo, "2")
     await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"stage": "spec"})
-    await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done")
+    await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done", {})
     await req(client_for, app, h, "POST", f"/api/items/{b}/filing", {"filing": "ignored"})
     await req(client_for, app, h, "POST", f"/api/items/{a}/deployed", {"live_at": "2026-11-12T09:00:00Z"})
     r = await req(client_for, app, h, "POST", "/api/relations",
@@ -129,7 +130,7 @@ async def test_confirm_done_moves_code_less_epic_to_done(make_app, client_for):
     await add_item(repo, "1", cat="done", epic_id=eid, filing="epic")
     await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"manual_column": "todo"})
     assert (await epic(repo))["board_column"] == "review"
-    r = await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done")
+    r = await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done", {})
     assert r.status_code == 200
     e = await epic(repo)
     assert (e["board_column"], e["done_confirmed_at"]) == ("done", NOW)
@@ -251,3 +252,38 @@ async def test_read_scope_cannot_write(make_app, client_for):
     app, repo, _ = await setup(make_app)
     t = await add_token(repo, name="ro", scopes="read")
     assert (await mk_project(client_for, app, bearer(t))).status_code == 403
+
+
+async def test_create_epic_without_waiting_on_is_422(make_app, client_for):
+    app, repo, h = await setup(make_app)
+    await mk_project(client_for, app, h)
+    assert (await mk_epic(client_for, app, h, waiting_on=None)).status_code == 422
+    r = await mk_epic(client_for, app, h, waiting_on=None, manual_column="canceled")
+    assert r.status_code == 201
+
+
+async def test_patch_epic_waiting_on_null_only_when_canceled(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"waiting_on": None})
+    assert r.status_code == 422
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1",
+                  {"waiting_on": None, "manual_column": "canceled"})
+    assert r.status_code == 200 and r.json()["waiting_on"] is None
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"manual_column": "todo"})
+    assert r.status_code == 422
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1",
+                  {"manual_column": "todo", "waiting_on": "human:owner"})
+    assert r.status_code == 200
+
+
+async def test_confirm_done_requires_json_content_type(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    async with client_for(app) as c:
+        r = await c.post("/api/epics/DEMO-E1/confirm-done", headers=h)
+        assert r.status_code == 415
+        r = await c.post("/api/epics/DEMO-E1/confirm-done", data={"x": "1"}, headers=h)
+        assert r.status_code == 415
+        r = await c.post("/api/epics/DEMO-E1/confirm-done", content="{}",
+                         headers={**h, "Content-Type": "application/json"})
+        assert r.status_code == 200
+    assert (await epic(repo))["done_confirmed_at"] == NOW

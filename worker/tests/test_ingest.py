@@ -268,3 +268,9 @@ async def test_project_key_does_not_move_standalone_item(make_app, client_for):
     before = (await row(repo))["project_id"]
     await post(client_for, app, t, [item(last_activity_at=T2, project_key="OTHER")])
     assert (await row(repo))["project_id"] == before
+
+
+async def test_out_of_range_timestamp_in_ingest_is_422(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    r = await post(client_for, app, t, [item(last_activity_at="9999-12-31T23:59:59-14:00")])
+    assert r.status_code == 422

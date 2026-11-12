@@ -255,3 +255,10 @@ async def test_epic_detail_with_60_items_stays_under_param_cap(repo):
     d = await reads.epic_detail(repo, key="DEMO-E1", now=NOW)
     assert len(d["tasks"]["todo"]) == 60 and len(d["relations"]) == 1 and len(d["events"]) == 1
     assert max(seen) <= 4
+
+
+async def test_stalled_skips_items_of_canceled_epic(repo):
+    e = await mk_epic(repo, manual="canceled", board="canceled")
+    await mk_item(repo, "1", e, "in_progress", last=NOW - 100 * H)
+    await mk_item(repo, "2", None, "in_progress", filing="standalone", last=NOW - 100 * H)
+    assert [r["ref"] for r in await reads.stalled(repo, now=NOW)] == ["kanban:2"]

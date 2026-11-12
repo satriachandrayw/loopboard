@@ -7,7 +7,7 @@ from loopboard.db import Repo
 
 
 def build_app(*, db=None, clock=None, access=None, jwks=None, verify_sig=None, fetch_certs=None) -> FastAPI:
-    app = FastAPI()
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     if db is not None:
         app.state.repo = Repo(db)
     app.state.clock = clock or time.time

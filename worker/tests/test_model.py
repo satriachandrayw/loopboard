@@ -15,3 +15,13 @@ def test_parse_ts_naive_rejected():
 def test_parse_ts_garbage_rejected():
     with pytest.raises(ValidationError):
         parse_ts("not a time")
+
+
+def test_parse_ts_out_of_range_rejected():
+    import pytest
+
+    from loopboard.model import ValidationError, parse_ts
+
+    for s in ("9999-12-31T23:59:59-14:00", "0001-01-01T00:00:00+14:00"):
+        with pytest.raises(ValidationError):
+            parse_ts(s)

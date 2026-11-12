@@ -78,6 +78,10 @@ async def patch_epic(repo, *, key, changes: EpicPatch, actor, now):
         if k in given and given[k] is None:
             raise ValidationError(f"{k} cannot be null")
     epic = await _epic(repo, key)
+    after = {**epic, **given}
+    if after["manual_column"] != "canceled" and not after["waiting_on"] and (
+            "waiting_on" in given or epic["manual_column"] == "canceled"):
+        raise ValidationError("waiting_on is required unless the epic is canceled")
     changed = {k: v for k, v in given.items() if epic[k] != v}
     if changed:
         sets = ", ".join(f"{k} = ?" for k in changed)
