@@ -10,6 +10,7 @@ from typing import Callable, Literal
 
 from fastapi import Depends, HTTPException, Request
 
+NBF_LEEWAY = 60
 ALL_SCOPES = frozenset({"ingest", "read", "write"})
 
 
@@ -85,9 +86,15 @@ async def verify_access_jwt(
     exp = claims.get("exp")
     if not isinstance(exp, (int, float)) or exp <= now:
         raise AuthError("expired")
-    ok = verify_sig(f"{parts[0]}.{parts[1]}".encode(), signature, jwk)
-    if inspect.isawaitable(ok):
-        ok = await ok
+    nbf = claims.get("nbf")
+    if nbf is not None and (isinstance(nbf, bool) or not isinstance(nbf, (int, float)) or nbf > now + NBF_LEEWAY):
+        raise AuthError("not yet valid")
+    try:
+        ok = verify_sig(f"{parts[0]}.{parts[1]}".encode(), signature, jwk)
+        if inspect.isawaitable(ok):
+            ok = await ok
+    except Exception as e:
+        raise AuthError("signature check failed") from e
     if ok is not True:
         raise AuthError("bad signature")
     return claims

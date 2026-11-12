@@ -323,3 +323,24 @@ async def test_invalid_bearer_does_not_use_access_when_disabled(make_app, client
     async with client_for(app) as c:
         r = await c.get("/api/health", headers={**bearer("lb_stale"), "Cf-Access-Jwt-Assertion": sign(claims())})
     assert r.status_code == 401
+
+
+async def test_access_jwt_not_yet_valid_is_401_with_60s_leeway(make_app, client_for):
+    app, _ = access_app(make_app)
+    async with client_for(app) as c:
+        ok = {"Cf-Access-Jwt-Assertion": sign(claims(nbf=NOW + 60))}
+        assert (await c.get("/api/health", headers=ok)).status_code == 200
+        bad = {"Cf-Access-Jwt-Assertion": sign(claims(nbf=NOW + 61))}
+        assert (await c.get("/api/health", headers=bad)).status_code == 401
+        junk = {"Cf-Access-Jwt-Assertion": sign(claims(nbf="soon"))}
+        assert (await c.get("/api/health", headers=junk)).status_code == 401
+
+
+async def test_verifier_exception_is_401_not_500(make_app, client_for):
+    def boom(signing_input, signature, jwk):
+        raise ValueError("unsupported key")
+
+    app, _ = make_app(access=ACCESS, jwks={"k1": {"kty": "EC"}}, verify_sig=boom, clock=lambda: NOW)
+    async with client_for(app) as c:
+        r = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
+    assert r.status_code == 401
