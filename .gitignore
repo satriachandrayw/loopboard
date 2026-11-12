@@ -1,0 +1,12 @@
+.worktrees/
+.ref/
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.wrangler/
+.dev.vars
+config.local.toml
+worker/public/
+.DS_Store
