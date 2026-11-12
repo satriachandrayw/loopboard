@@ -344,3 +344,15 @@ async def test_verifier_exception_is_401_not_500(make_app, client_for):
     async with client_for(app) as c:
         r = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
     assert r.status_code == 401
+
+
+async def test_api_responses_carry_security_headers(make_app, client_for):
+    app, repo = make_app()
+    t = await add_token(repo, name="bot")
+    async with client_for(app) as c:
+        ok = await c.get("/api/health", headers=bearer(t))
+        denied = await c.get("/api/health")
+    assert (ok.status_code, denied.status_code) == (200, 401)
+    for r in (ok, denied):
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["cache-control"] == "no-store"

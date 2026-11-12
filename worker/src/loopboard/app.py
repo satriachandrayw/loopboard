@@ -6,8 +6,32 @@ from loopboard.auth import AccessConfig, AuthError, Principal, require, web_cryp
 from loopboard.db import Repo
 
 
+API_HEADERS = ((b"x-content-type-options", b"nosniff"), (b"cache-control", b"no-store"))
+
+
+class ApiHeaders:
+    """Pure ASGI middleware: every /api/* response gets nosniff and no-store."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/api/"):
+            return await self.app(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                names = {h for h, _ in API_HEADERS}
+                headers = [(k, v) for k, v in message.get("headers", []) if k.lower() not in names]
+                message = {**message, "headers": headers + list(API_HEADERS)}
+            await send(message)
+
+        return await self.app(scope, receive, send_with_headers)
+
+
 def build_app(*, db=None, clock=None, access=None, jwks=None, verify_sig=None, fetch_certs=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(ApiHeaders)
     if db is not None:
         app.state.repo = Repo(db)
     app.state.clock = clock or time.time

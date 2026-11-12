@@ -14,6 +14,7 @@ explicit offset or `Z`; a naive timestamp is 422. Request bodies reject unknown 
   `Cf-Access-Authenticated-User-Email` header alone is never trusted.
 - Status codes for every route: `401` no or invalid credentials, `403` the credentials lack the
   scope (or an ingest token bound to another source or to none), `422` invalid body or parameters.
+- Every `/api/*` response carries `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
 
 ## Ingest (scope `ingest`)
 
