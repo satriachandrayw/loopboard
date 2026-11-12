@@ -25,6 +25,17 @@ def _ev(now, actor, stype, sid, kind, payload):
     return (EVENT, (now, actor, stype, sid, kind, json.dumps(payload)))
 
 
+async def _batch(repo, stmts, what):
+    """repo.batch, mapping a uniqueness violation (lost race) to Conflict. sqlite3 raises
+    IntegrityError; on D1 the error is a JS exception whose message mentions the constraint."""
+    try:
+        return await repo.batch(stmts)
+    except Exception as e:
+        if type(e).__name__ == "IntegrityError" or "constraint" in str(e).lower():
+            raise Conflict(what) from e
+        raise
+
+
 async def _one(repo, sql, args, what):
     row = await repo.first(sql, args)
     if row is None:
@@ -43,11 +54,11 @@ async def _epic(repo, key):
 async def create_project(repo, *, key, name, actor, now):
     if await repo.first("select id from projects where key = ?", (key,)):
         raise Conflict(f"project {key} exists")
-    await repo.batch([
+    await _batch(repo, [
         ("insert into projects(key, name, created_at) values (?, ?, ?)", (key, name, now)),
         (EVENT_BY_SQL.format(table="projects", where="key = ?"),
          (now, actor, "project", "project.created", json.dumps({"key": key, "name": name}), key)),
-    ])
+    ], f"project {key} exists")
     return await _project(repo, key)
 
 
@@ -60,11 +71,11 @@ async def create_epic(repo, *, project_key, body: EpicIn, actor, now):
     payload = {"key": key, "project_id": project["id"], **fields}
     cols = ["project_id", "seq", "key", *fields, "board_column", "last_activity_at", "created_at", "updated_at"]
     vals = [project["id"], seq, key, *fields.values(), fields["manual_column"], now, now, now]
-    await repo.batch([
+    await _batch(repo, [
         (f"insert into epics({', '.join(cols)}) values ({', '.join('?' * len(cols))})", vals),
         (EVENT_BY_SQL.format(table="epics", where="key = ?"),
          (now, actor, "epic", "epic.created", json.dumps(payload), key)),
-    ])
+    ], f"epic {key} exists")
     epic = await _epic(repo, key)
     await recompute_epic(repo, epic["id"], actor=actor, via="api", now=now)
     return await _epic(repo, key)
@@ -176,14 +187,14 @@ async def create_relation(repo, *, body: RelationIn, actor, now):
                         "and to_type=? and to_id=?", args):
         raise Conflict("relation exists")
     payload = {"kind": "blocks", **body.model_dump()}
-    await repo.batch([
+    await _batch(repo, [
         ("insert into relations(kind, from_type, from_id, to_type, to_id, created_at) "
          "values ('blocks', ?, ?, ?, ?, ?)", (*args, now)),
         (EVENT_BY_SQL.format(table="relations", where="kind='blocks' and from_type=? and from_id=? "
                              "and to_type=? and to_id=?"),
          (now, actor, "relation", "relation.created", json.dumps(payload), *args)),
         *_touch(body.from_type, a, now), *_touch(body.to_type, b, now),
-    ])
+    ], "relation exists")
     return await repo.first("select * from relations where kind='blocks' and from_type=? and from_id=? "
                             "and to_type=? and to_id=?", args)
 

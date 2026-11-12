@@ -313,3 +313,39 @@ async def test_deployed_rejects_far_future_live_at(make_app, client_for):
     r = await req(client_for, app, h, "POST", f"/api/items/{i}/deployed", {"live_at": "2027-11-12T09:00:00Z"})
     assert r.status_code == 422
     assert (await repo.first("select live_at from items where id=?", (i,)))["live_at"] is None
+
+
+def _blind_first(app, needle, result=None):
+    """Make the app's repo miss the pre-check query, simulating a lost race."""
+    repo = app.state.repo
+    orig = repo.first
+
+    async def first(sql, args=()):
+        if needle in sql:
+            return result
+        return await orig(sql, args)
+
+    repo.first = first
+
+
+async def test_duplicate_project_race_is_409_not_500(make_app, client_for):
+    app, _, h = await seeded(make_app, client_for)
+    _blind_first(app, "select id from projects where key")
+    r = await mk_project(client_for, app, h)
+    assert r.status_code == 409
+
+
+async def test_epic_seq_race_is_409_not_500(make_app, client_for):
+    app, _, h = await seeded(make_app, client_for)
+    _blind_first(app, "max(seq)", {"m": 0})
+    r = await mk_epic(client_for, app, h)
+    assert r.status_code == 409
+
+
+async def test_duplicate_relation_race_is_409_not_500(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    await mk_epic(client_for, app, h, title="E2")
+    body = {"from_type": "epic", "from_id": 1, "to_type": "epic", "to_id": 2}
+    assert (await req(client_for, app, h, "POST", "/api/relations", body)).status_code == 201
+    _blind_first(app, "select id from relations where kind='blocks'")
+    assert (await req(client_for, app, h, "POST", "/api/relations", body)).status_code == 409
