@@ -19,8 +19,8 @@ def load_config(path) -> dict:
 def resolve_token(cfg: dict, env: Mapping[str, str]) -> str:
     name = cfg.get("loopboard", {}).get("token_env")
     if not name:
-        raise ConfigError("[loopboard] token_env is not set")
+        raise ConfigError("token_env is not configured")
     token = env.get(name)
     if not token:
-        raise ConfigError(f"environment variable {name} is not set")
+        raise ConfigError("token environment variable is not set")
     return token

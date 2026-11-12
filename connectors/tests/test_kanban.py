@@ -143,3 +143,37 @@ def test_board_flag_and_argv():
 def test_replay_missing_file(tmp_path):
     with pytest.raises(SourceError):
         kanban.replay_runner(tmp_path)(["hermes", "kanban", "list", "--json"])
+
+
+import pytest as _pt
+
+
+@_pt.mark.parametrize("mutate", [
+    lambda s: s.update(events=None),
+    lambda s: s.update(events=["x"]),
+    lambda s: s.update(events=[{"kind": "blocked", "payload": "str", "created_at": 5}]),
+    lambda s: s.update(events=[{"kind": "blocked", "payload": {}}]),
+    lambda s: s.update(events=[{"kind": "blocked", "payload": {}, "created_at": "abc"}]),
+])
+def test_malformed_events_fail_run(mutate):
+    base = kanban.replay_runner(FIX)
+
+    def run(argv):
+        out = base(argv)
+        if "show" in argv:
+            s = json.loads(out)
+            s["task"]["status"] = "blocked"
+            mutate(s)
+            return json.dumps(s)
+        return out
+
+    with pytest.raises(SourceError):
+        kanban.collect(run, human="owner", tenants=TENANTS, board=None)
+
+
+def test_replay_with_board_arg():
+    run = kanban.replay_runner(FIX)
+    assert json.loads(run(["hermes", "kanban", "--board", "b", "list", "--json"]))
+    assert json.loads(run(["hermes", "kanban", "--board", "b", "show", "2", "--json"]))["task"]["id"] == 2
+    with pytest.raises(SourceError):
+        run(["hermes", "kanban", "--board", "show", "--json"])

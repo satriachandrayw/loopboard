@@ -161,3 +161,46 @@ def test_epic_key_omitted_from_payload_when_none(tmp_path, capsys):
     run(tmp_path, capsys, post=post)
     for it in post.calls[0][1]["items"]:
         assert "epic_key" not in it
+
+
+def test_malformed_event_exits_1_nothing_posted(tmp_path, capsys):
+    post = Poster()
+
+    def runner(argv):
+        if "list" in argv:
+            return json.dumps([{"id": 1, "title": "t", "status": "blocked", "assignee": None,
+                                "tenant": None, "created_at": 1}])
+        return json.dumps({"events": None})
+
+    code, out, _ = run(tmp_path, capsys, post=post, run_cli=runner, replay=None)
+    assert code == 1 and post.calls == [] and "error" in summary(out)
+
+
+def test_redirect_not_followed_and_token_not_forwarded():
+    import http.server, threading
+    from loopboard_connectors.client import _urllib_post
+    seen = []
+
+    class Target(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.append(self.headers.get("Authorization"))
+            self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
+        def log_message(self, *a): pass
+
+    tgt = http.server.HTTPServer(("127.0.0.1", 0), Target)
+
+    class Redir(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(307)
+            self.send_header("Location", f"http://127.0.0.1:{tgt.server_port}/x")
+            self.end_headers()
+        def log_message(self, *a): pass
+
+    red = http.server.HTTPServer(("127.0.0.1", 0), Redir)
+    for s in (tgt, red):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    import pytest
+    with pytest.raises(IngestRejected) as e:
+        _urllib_post(f"http://127.0.0.1:{red.server_port}/api/ingest", b"{}", {"Authorization": "Bearer t"})
+    assert e.value.status == 307 and seen == []
+    tgt.shutdown(); red.shutdown()

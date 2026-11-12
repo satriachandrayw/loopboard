@@ -10,10 +10,18 @@ CHUNK = 100
 COUNTS = ("accepted", "created", "updated", "skipped_older")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None  # a redirect surfaces as HTTPError; the token is never forwarded
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _urllib_post(url: str, body: bytes, headers: dict) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _OPENER.open(req, timeout=30) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise IngestRejected(e.code, e.reason if isinstance(e.reason, str) else "") from None

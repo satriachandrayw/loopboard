@@ -56,8 +56,8 @@ def map_task(task: dict, show: dict, *, human: str, tenants: dict[str, str]) -> 
     else:
         waiting = None
     stamps = [task.get(k) for k in ("created_at", "started_at", "completed_at")]
-    stamps += [e.get("created_at") for e in events]
     stamps = [s for s in stamps if s is not None]
+    stamps += [e["created_at"] for e in events]
     if not stamps:
         raise SourceError("no timestamps")
     return Item(
@@ -86,7 +86,12 @@ def collect(run_cli: Callable[[list[str]], str], *, human: str, tenants: dict[st
     for t in tasks:
         tid = _need(t, "id")
         show = _parse(run_cli(base + ["show", str(tid), "--json"]))
-        items.append(map_task(t, show, human=human, tenants=tenants))
+        try:
+            items.append(map_task(t, show, human=human, tenants=tenants))
+        except SourceError:
+            raise
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise SourceError(f"malformed data for task {tid}") from None
     return items
 
 
@@ -104,9 +109,11 @@ def replay_runner(directory) -> Callable[[list[str]], str]:
     d = Path(directory)
 
     def run(argv: list[str]) -> str:
-        if "show" in argv:
-            name = f"show-{argv[argv.index('show') + 1]}.json"
-        elif "list" in argv:
+        i = 4 if argv[2:3] == ["--board"] else 2
+        cmd = argv[i:i + 1]
+        if cmd == ["show"] and len(argv) > i + 1:
+            name = f"show-{argv[i + 1]}.json"
+        elif cmd == ["list"]:
             name = "list.json"
         else:
             raise SourceError("unsupported command")
