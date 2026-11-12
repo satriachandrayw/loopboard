@@ -1,0 +1,35 @@
+{
+ "task": {
+  "id": 1,
+  "title": "Task 1",
+  "status": "triage",
+  "assignee": null,
+  "tenant": "demo",
+  "priority": 0,
+  "created_at": 1762900100,
+  "started_at": null,
+  "completed_at": null,
+  "body": "SECRET-BODY",
+  "result": "SECRET-BODY",
+  "session_id": null
+ },
+ "latest_summary": "SECRET-BODY",
+ "parents": [],
+ "children": [],
+ "comments": [
+  {
+   "author": "owner",
+   "body": "SECRET-BODY",
+   "created_at": 1762900100
+  }
+ ],
+ "events": [
+  {
+   "kind": "created",
+   "payload": {},
+   "created_at": 1762900100,
+   "run_id": null
+  }
+ ],
+ "runs": []
+}

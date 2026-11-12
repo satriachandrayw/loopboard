@@ -1,0 +1,41 @@
+{
+ "task": {
+  "id": 7,
+  "title": "Task 7",
+  "status": "done",
+  "assignee": "builder",
+  "tenant": "demo",
+  "priority": 0,
+  "created_at": 1762900700,
+  "started_at": null,
+  "completed_at": 1762900800,
+  "body": "SECRET-BODY",
+  "result": "SECRET-BODY",
+  "session_id": null
+ },
+ "latest_summary": "SECRET-BODY",
+ "parents": [],
+ "children": [],
+ "comments": [
+  {
+   "author": "owner",
+   "body": "SECRET-BODY",
+   "created_at": 1762900700
+  }
+ ],
+ "events": [
+  {
+   "kind": "created",
+   "payload": {},
+   "created_at": 1762900700,
+   "run_id": null
+  },
+  {
+   "kind": "completed",
+   "payload": {},
+   "created_at": 1762900800,
+   "run_id": null
+  }
+ ],
+ "runs": []
+}

@@ -1,0 +1,53 @@
+{
+ "task": {
+  "id": 5,
+  "title": "Task 5",
+  "status": "blocked",
+  "assignee": "builder",
+  "tenant": "demo",
+  "priority": 0,
+  "created_at": 1762900500,
+  "started_at": null,
+  "completed_at": null,
+  "body": "SECRET-BODY",
+  "result": "SECRET-BODY",
+  "session_id": null
+ },
+ "latest_summary": "SECRET-BODY",
+ "parents": [],
+ "children": [],
+ "comments": [
+  {
+   "author": "owner",
+   "body": "SECRET-BODY",
+   "created_at": 1762900500
+  }
+ ],
+ "events": [
+  {
+   "kind": "created",
+   "payload": {},
+   "created_at": 1762900500,
+   "run_id": null
+  },
+  {
+   "kind": "blocked",
+   "payload": {
+    "kind": "transient",
+    "reason": "SECRET-BODY"
+   },
+   "created_at": 1762900520,
+   "run_id": null
+  },
+  {
+   "kind": "blocked",
+   "payload": {
+    "kind": "needs_input",
+    "reason": "SECRET-BODY"
+   },
+   "created_at": 1762900560,
+   "run_id": null
+  }
+ ],
+ "runs": []
+}

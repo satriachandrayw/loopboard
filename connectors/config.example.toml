@@ -1,3 +1,14 @@
-# Copy to config.toml (git-ignored) and fill in.
+# Copy to config.toml (git-ignored) and fill in. Never put the token here;
+# export it in the environment variable named by token_env.
+[loopboard]
 url = "https://loopboard.example.workers.dev"
-token = ""
+token_env = "LOOPBOARD_TOKEN"
+
+[general]
+human = "owner"
+
+[kanban]
+# board = "default"      # optional Hermes board slug
+
+[kanban.tenants]         # Hermes tenant -> Loopboard project key
+demo = "DEMO"

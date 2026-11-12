@@ -1,0 +1,18 @@
+{
+ "categories": {
+  "todo": 2,
+  "in_progress": 1,
+  "review": 1,
+  "blocked": 2,
+  "done": 1,
+  "canceled": 1
+ },
+ "unfiled": 7,
+ "board": {
+  "backlog": 0,
+  "todo": 0,
+  "in_progress": 1,
+  "review": 0,
+  "done": 0
+ }
+}
