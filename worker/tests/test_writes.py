@@ -349,3 +349,18 @@ async def test_duplicate_relation_race_is_409_not_500(make_app, client_for):
     assert (await req(client_for, app, h, "POST", "/api/relations", body)).status_code == 201
     _blind_first(app, "select id from relations where kind='blocks'")
     assert (await req(client_for, app, h, "POST", "/api/relations", body)).status_code == 409
+
+
+async def test_non_unique_integrity_error_is_not_409(make_app, client_for):
+    import sqlite3
+    app, repo, h = await seeded(make_app, client_for)
+
+    async def boom(stmts):
+        raise sqlite3.IntegrityError("NOT NULL constraint failed: projects.name")
+
+    app.state.repo.batch = boom
+    try:
+        r = await mk_project(client_for, app, h, key="ZZZ")
+    except sqlite3.IntegrityError:
+        return
+    assert r.status_code != 409

@@ -26,12 +26,12 @@ def _ev(now, actor, stype, sid, kind, payload):
 
 
 async def _batch(repo, stmts, what):
-    """repo.batch, mapping a uniqueness violation (lost race) to Conflict. sqlite3 raises
-    IntegrityError; on D1 the error is a JS exception whose message mentions the constraint."""
+    """repo.batch, mapping a UNIQUE violation (lost race) to Conflict. sqlite3 raises IntegrityError and
+    D1 a JS exception, both with "UNIQUE constraint failed" in the message; other errors propagate."""
     try:
         return await repo.batch(stmts)
     except Exception as e:
-        if type(e).__name__ == "IntegrityError" or "constraint" in str(e).lower():
+        if "UNIQUE constraint failed" in str(e):
             raise Conflict(what) from e
         raise
 
