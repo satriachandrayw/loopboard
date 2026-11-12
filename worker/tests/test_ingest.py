@@ -189,3 +189,82 @@ async def test_project_key_does_not_move_epic_filed_item_out_of_epic_project(mak
     before = (await row(repo))["project_id"]
     await post(client_for, app, t, [item(last_activity_at=T2, project_key="OTHER")])
     assert (await row(repo))["project_id"] == before
+
+
+class CountingD1:
+    """Wraps FakeD1 and counts D1 round trips (each statement run or batch is one call)."""
+
+    def __init__(self, db):
+        self._db, self.calls = db, 0
+        orig_run, orig_batch = db._run_one, db.batch
+
+        def run_one(stmt):
+            self.calls += 1
+            return orig_run(stmt)
+
+        async def batch(stmts):
+            self.calls += 1
+            return await orig_batch(stmts)
+
+        db._run_one, db.batch = run_one, batch
+
+
+async def test_100_item_ingest_uses_bounded_d1_calls(client_for):
+    from loopboard.app import build_app
+    from loopboard.db import Repo
+    from tests.fakes.d1 import FakeD1
+
+    db = FakeD1()
+    db.apply_migrations()
+    repo = Repo(db)
+    app = build_app(db=db, clock=lambda: NOW)
+    t = await add_token(repo, name="bot", scopes="ingest")
+    await mk_epic(repo)
+    await mk_epic(repo, "DEMO-E2")
+    items = [item(external_id=f"i{n}", project_key="DEMO",
+                  **({"epic_key": f"DEMO-E{1 + n % 2}"} if n % 3 == 0 else {}))
+             for n in range(100)]
+    counter = CountingD1(db)
+
+    r = await post(client_for, app, t, items)
+    assert r.status_code == 200 and r.json()["created"] == 100
+    assert counter.calls <= 10, counter.calls
+    assert len(await events(repo)) == 100
+
+    counter.calls = 0
+    r = await post(client_for, app, t, items)
+    assert (r.json()["created"], r.json()["updated"]) == (0, 0)
+    assert counter.calls <= 10, counter.calls
+
+    counter.calls = 0
+    r = await post(client_for, app, t, [dict(x, title="new", last_activity_at=T2) for x in items])
+    assert r.json()["updated"] == 100
+    assert counter.calls <= 10, counter.calls
+    e1 = await repo.first("select board_column from epics where key='DEMO-E1'")
+    assert e1["board_column"] == "todo"
+
+
+async def test_duplicate_new_item_in_batch_creates_then_updates(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    r = await post(client_for, app, t, [item(), item(title="B", last_activity_at=T2)])
+    assert (r.json()["created"], r.json()["updated"]) == (1, 1)
+    assert (await row(repo))["title"] == "B"
+    assert [e["kind"] for e in await events(repo)] == ["item.created", "item.updated"]
+
+
+async def test_ingest_recomputes_epic_column(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo)
+    await post(client_for, app, t, [item(epic_key="DEMO-E1", status_category="in_progress")])
+    assert (await repo.first("select board_column from epics"))["board_column"] == "in_progress"
+
+
+async def test_project_key_does_not_move_standalone_item(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await repo.execute("insert into projects(key,name,created_at) values ('DEMO','d',1)")
+    await repo.execute("insert into projects(key,name,created_at) values ('OTHER','o',1)")
+    await post(client_for, app, t, [item(project_key="DEMO")])
+    await repo.execute("update items set filing='standalone'")
+    before = (await row(repo))["project_id"]
+    await post(client_for, app, t, [item(last_activity_at=T2, project_key="OTHER")])
+    assert (await row(repo))["project_id"] == before

@@ -1,35 +1,55 @@
-"""Idempotent item upsert (D1, D11, D12, D13)."""
+"""Idempotent item upsert (D1, D11, D12, D13).
+
+Bounded D1 calls per request (Free plan allows ~50 queries per invocation):
+stored rows, epics and projects are loaded with `in (...)` selects (99 ids per
+select), every insert/update/event goes into one batch, and touched epics are
+recomputed with recompute_epics.
+"""
 import json
 
 from .model import ItemIn, ValidationError, parse_ts
-from .recompute import recompute_epic
+from .recompute import _qs, chunks, recompute_epics
 
 PLAIN = ("title", "url", "status_category", "raw_status", "owner", "waiting_on",
          "blocked_reason", "next_step")
 STORED = PLAIN + ("last_activity_at", "merged_at", "live_at", "project_id", "epic_id", "filing")
+EVENT = "insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
+ITEM_ID = "(select id from items where source = ? and external_id = ?)"
+
+
+async def _by_key(repo, sql: str, keys) -> dict:
+    out = {}
+    for part in chunks(sorted(keys)):
+        for r in await repo.query(sql.format(_qs(len(part))), part):
+            out[r["key"]] = r
+    return out
 
 
 async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, via: str, now: int) -> dict:
     # Resolve every referenced epic/project before any write.
-    epics, projects = {}, {}
-    for it in items:
-        if it.epic_key and it.epic_key not in epics:
-            row = await repo.first("select id, project_id from epics where key = ?", (it.epic_key,))
-            if row is None:
-                raise ValidationError(f"unknown epic_key {it.epic_key}")
-            epics[it.epic_key] = row
-        if it.project_key and it.project_key not in projects:
-            row = await repo.first("select id from projects where key = ?", (it.project_key,))
-            if row is None:
-                raise ValidationError(f"unknown project_key {it.project_key}")
-            projects[it.project_key] = row["id"]
+    epic_keys = {it.epic_key for it in items if it.epic_key}
+    project_keys = {it.project_key for it in items if it.project_key}
+    epics = await _by_key(repo, "select id, project_id, key from epics where key in ({})", epic_keys)
+    projects = await _by_key(repo, "select id, key from projects where key in ({})", project_keys)
+    for k in sorted(epic_keys - epics.keys()):
+        raise ValidationError(f"unknown epic_key {k}")
+    for k in sorted(project_keys - projects.keys()):
+        raise ValidationError(f"unknown project_key {k}")
+
+    # Current state per external_id; updated in memory as the batch is applied in order.
+    state: dict[str, dict | None] = {}
+    for part in chunks(sorted({it.external_id for it in items})):
+        for r in await repo.query(
+                f"select * from items where source = ? and external_id in ({_qs(len(part))})",
+                [source, *part]):
+            state[r["external_id"]] = r
 
     out = {"accepted": len(items), "created": 0, "updated": 0, "skipped_older": 0}
     touched: set[int] = set()
+    stmts: list = []
     for it in items:
         ts = parse_ts(it.last_activity_at)
-        stored = await repo.first(
-            "select * from items where source = ? and external_id = ?", (source, it.external_id))
+        stored = state.get(it.external_id)
         if stored is not None and stored["last_activity_at"] > ts:
             out["skipped_older"] += 1
             continue
@@ -39,9 +59,10 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
         for k in ("merged_at", "live_at"):
             if getattr(it, k) is not None:
                 new[k] = parse_ts(getattr(it, k))
-        keeps_epic_project = stored is not None and stored["filing"] == "epic" and not it.epic_key
-        if it.project_key and not keeps_epic_project:
-            new["project_id"] = projects[it.project_key]
+        keeps_project = (stored is not None and stored["filing"] in ("epic", "standalone")
+                         and not it.epic_key)
+        if it.project_key and not keeps_project:
+            new["project_id"] = projects[it.project_key]["id"]
         if it.epic_key:
             e = epics[it.epic_key]
             new.update(project_id=e["project_id"], epic_id=e["id"], filing="epic")
@@ -52,13 +73,12 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
             payload = {"source": source, "external_id": it.external_id, **new}
             cols = ["source", "external_id", "created_at", "updated_at", *new]
             vals = [source, it.external_id, now, now, *new.values()]
-            await repo.batch([
-                (f"insert into items({', '.join(cols)}) values ({', '.join('?' * len(cols))})", vals),
-                ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
-                 "select ?, ?, ?, 'item', id, 'item.created', ? from items "
-                 "where source = ? and external_id = ?",
-                 (now, actor, via, json.dumps(payload), source, it.external_id)),
-            ])
+            stmts += [
+                (f"insert into items({', '.join(cols)}) values ({_qs(len(cols))})", vals),
+                (EVENT + f"values(?, ?, ?, 'item', {ITEM_ID}, 'item.created', ?)",
+                 (now, actor, via, source, it.external_id, json.dumps(payload))),
+            ]
+            state[it.external_id] = {**{k: None for k in STORED}, **new}
             out["created"] += 1
             if new.get("epic_id"):
                 touched.add(new["epic_id"])
@@ -68,17 +88,19 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
         if not changed:
             continue
         sets = ", ".join(f"{k} = ?" for k in changed)
-        await repo.batch([
-            (f"update items set {sets}, updated_at = ? where id = ?", [*changed.values(), now, stored["id"]]),
-            ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
-             "values(?, ?, ?, 'item', ?, 'item.updated', ?)",
-             (now, actor, via, stored["id"], json.dumps(changed))),
-        ])
+        stmts += [
+            (f"update items set {sets}, updated_at = ? where source = ? and external_id = ?",
+             [*changed.values(), now, source, it.external_id]),
+            (EVENT + f"values(?, ?, ?, 'item', {ITEM_ID}, 'item.updated', ?)",
+             (now, actor, via, source, it.external_id, json.dumps(changed))),
+        ]
+        state[it.external_id] = {**stored, **changed}
         out["updated"] += 1
         for eid in (stored["epic_id"], changed.get("epic_id")):
             if eid:
                 touched.add(eid)
 
-    for eid in sorted(touched):
-        await recompute_epic(repo, eid, actor=actor, via=via, now=now)
+    if stmts:
+        await repo.batch(stmts)
+    await recompute_epics(repo, touched, actor=actor, via=via, now=now)
     return out
