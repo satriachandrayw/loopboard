@@ -31,6 +31,13 @@ def _need(d: dict, key: str):
     return d[key]
 
 
+def _need_value(d: dict, key: str):
+    v = _need(d, key)
+    if v is None:
+        raise SourceError(f"missing field: {key}")
+    return v
+
+
 def _block_kind(events: list) -> str:
     newest = None
     for e in events:
@@ -66,7 +73,7 @@ def map_task(task: dict, show: dict, *, human: str, tenants: dict[str, str]) -> 
     if not stamps:
         raise SourceError("no timestamps")
     return Item(
-        source="kanban", external_id=str(_need(task, "id")), title=str(_need(task, "title"))[:300], url=None,
+        source="kanban", external_id=str(_need(task, "id")), title=str(_need_value(task, "title"))[:300], url=None,
         status_category=category, raw_status=status,
         owner=agent, waiting_on=waiting, blocked_reason=reason, next_step=None,
         project_key=tenants.get(task.get("tenant")), epic_key=None,

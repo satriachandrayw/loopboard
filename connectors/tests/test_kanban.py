@@ -288,3 +288,17 @@ def test_hermes_named_github_token_absent_from_child_env(monkeypatch, tmp_path):
     cli.main(["sync", "kanban", "--config", str(cfg), "--dry-run"], env={})
     assert "HERMES_GH_TOKEN" not in seen["env"]
     assert seen["env"]["HERMES_HOME"] == "/x"
+
+
+@pytest.mark.parametrize("drop", [True, False])
+def test_missing_or_null_title_is_source_error(drop):
+    task, show = mk("todo")
+    if drop:
+        del task["title"]
+    else:
+        task["title"] = None
+    with pytest.raises(SourceError, match="title"):
+        kanban.map_task(task, show, human="owner", tenants=TENANTS)
+    with pytest.raises(SourceError, match="title"):
+        kanban.collect(lambda argv: json.dumps([task] if "list" in argv else show),
+                       human="owner", tenants=TENANTS, board=None)
