@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Card as CardT } from '../types'
 
-const FLAG_TEXT: Record<string, string> = {
+export const FLAG_TEXT: Record<string, string> = {
   awaiting_approval: 'awaiting your approval',
   awaiting_confirmation: 'awaiting your confirmation',
   blocked_needs_input: 'blocked: needs your input',
