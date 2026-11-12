@@ -10,6 +10,13 @@ Loopboard groups work from agent tools (Hermes Kanban cards, GitHub pull request
 
 **Status:** pre-alpha, v1a under construction. See [`docs/design.md`](docs/design.md) and the [v1a plan](docs/plans/2026-11-12-loopboard-v1a.md).
 
+## Docs
+
+- [Install and run](docs/install.md)
+- [API](docs/api.md)
+- [Connectors](docs/connectors.md)
+- [Design](docs/design.md)
+
 ## License
 
 MIT
