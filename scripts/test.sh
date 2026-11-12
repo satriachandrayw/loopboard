@@ -35,4 +35,12 @@ if [ -f "$ROOT/web/package-lock.json" ]; then
   npm ci --no-audit --no-fund
   npx vitest run
   npm run build
+  echo "== built _headers"
+  BUILT="$ROOT/worker/public/_headers"
+  [ -f "$BUILT" ] || { echo "missing $BUILT after web build" >&2; exit 1; }
+  cmp -s "$BUILT" "$ROOT/web/public/_headers" || { echo "built _headers differs from web/public/_headers" >&2; exit 1; }
+  grep -qxF "  Content-Security-Policy: default-src 'self'; frame-ancestors 'none'" "$BUILT" \
+    && grep -qxF "  X-Content-Type-Options: nosniff" "$BUILT" && grep -qxF "/*" "$BUILT" \
+    || { echo "built _headers lacks CSP or nosniff for /*" >&2; exit 1; }
+  echo "built _headers ok"
 fi
