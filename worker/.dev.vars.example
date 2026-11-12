@@ -1,0 +1,3 @@
+# Local dev secrets/vars (copy to .dev.vars)
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=

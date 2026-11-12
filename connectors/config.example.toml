@@ -1,0 +1,3 @@
+# Copy to config.toml (git-ignored) and fill in.
+url = "https://loopboard.example.workers.dev"
+token = ""

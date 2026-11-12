@@ -10,3 +10,9 @@ __pycache__/
 config.local.toml
 worker/public/
 .DS_Store
+dist/
+connectors/config.toml
+connectors/config.local.toml
+.venv-workers/
+python_modules/
+worker/pylock.toml
