@@ -360,15 +360,24 @@ REL_PRS = [
 ]
 
 
+def _commits(shas):
+    return {"status": "ahead", "total_commits": len(shas), "commits": [{"sha": s} for s in shas]}
+
+
 def rel_fetch(compare, prs=REL_PRS, seen=None):
+    """compare(live, base, page) answers GET compare/{live}...{base}; it returns the dict or raises."""
     def f(url):
         if seen is not None:
             seen.append(url)
         if url.startswith(REL + "/pulls?"):
-            return prs
+            page = int(url.split("&page=")[1])
+            return prs[(page - 1) * 100: page * 100]
         if url.startswith(REL + "/compare/"):
-            sha, branch = url.split("/compare/")[1].split("?")[0].split("...")
-            return compare(sha, branch)
+            path, query = url.split("/compare/")[1].split("?")
+            live, base = path.split("...")
+            q = dict(p.split("=", 1) for p in query.split("&"))
+            assert q["per_page"] == "250", url
+            return compare(live, base, int(q["page"]))
         raise AssertionError(url)
     return f
 
@@ -379,87 +388,144 @@ def rel_collect(fetch, lookback=14):
     return {i.external_id: i for i in items}
 
 
+def none_missing(live, base, page):
+    return _commits([])  # main has every commit of development
+
+
 def test_feature_pr_into_development_becomes_live_when_main_contains_it():
     seen = []
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "ahead"}, seen=seen))
+    items = rel_collect(rel_fetch(none_missing, seen=seen))
     i = items["owner/rel#21"]
     assert i.live_at == "2026-11-07T12:00:00Z"  # earliest release merged at or after 2026-11-05
     assert i.merged_at == "2026-11-05T10:00:00Z" and i.raw_status == "merged"
-    assert f"{REL}/compare/m21...main?per_page=1" in seen
+    assert [u for u in seen if "/compare/" in u] == [f"{REL}/compare/main...development?per_page=250&page=1"]
 
 
-@pytest.mark.parametrize("status", ["behind", "diverged"])
-def test_not_contained_stays_merged_not_live(status):
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": status}))
+def test_merge_sha_in_compare_stays_merged_not_live():
+    items = rel_collect(rel_fetch(lambda live, base, page: _commits(["x1", "m21", "m22", "x2"])))
     for n in (21, 22):
         assert items[f"owner/rel#{n}"].live_at is None
         assert items[f"owner/rel#{n}"].raw_status == "merged"
 
 
+def test_release_check_uses_one_branch_compare():
+    prs = [_merged(100 + k, f"2026-11-{1 + k // 24:02d}T{k % 24:02d}:00:00Z", "development") for k in range(100)]
+    prs.reverse()  # the listing is newest-first
+    prs.append(_merged(30, "2026-11-11T12:00:00Z", "main"))  # release after every feature PR
+    seen = []
+    items = rel_collect(rel_fetch(lambda live, base, page: _commits(["m150", "m199", "other"]), prs=prs,
+                                  seen=seen))
+    assert len([u for u in seen if "/compare/" in u]) == 1
+    not_live = {k for k, i in items.items() if i.raw_status == "merged" and i.live_at is None}
+    assert not_live == {"owner/rel#150", "owner/rel#199"}
+    assert items["owner/rel#100"].live_at == "2026-11-11T12:00:00Z"
+    assert sum(1 for i in items.values() if i.live_at) == 98 + 1  # 98 features plus the release itself
+
+
+def test_branch_compare_pages():
+    calls = []
+
+    def compare(live, base, page):
+        calls.append(page)
+        if page == 1:
+            return _commits([f"x{k}" for k in range(250)])
+        return _commits(["m22"] + [f"y{k}" for k in range(9)])
+    items = rel_collect(rel_fetch(compare))
+    assert calls == [1, 2]
+    assert items["owner/rel#21"].live_at == "2026-11-07T12:00:00Z"
+    assert items["owner/rel#22"].live_at is None  # on page 2
+
+
+def test_branch_compare_page_cap_raises_source_error():
+    pages = []
+
+    def compare(live, base, page):
+        pages.append(page)
+        return _commits([f"x{page}-{k}" for k in range(250)])
+    with pytest.raises(SourceError):
+        rel_collect(rel_fetch(compare))
+    assert len(pages) == github.MAX_PAGES
+
+
+def test_one_compare_per_base_and_live_branch():
+    prs = REL_PRS + [_merged(23, "2026-11-06T10:00:00Z", "staging")]
+    seen = []
+    items = github.collect(rel_fetch(none_missing, prs=prs, seen=seen), repos={"owner/rel": "REL"},
+                           human="owner", agent_logins=AGENTS,
+                           live_branches={"owner/rel": ["main", "prod"]}, lookback_days=14, now=NOW)
+    compares = sorted(u.split("/compare/")[1].split("?")[0] for u in seen if "/compare/" in u)
+    assert compares == ["main...development", "main...staging", "prod...development", "prod...staging"]
+    assert all(i.live_at for i in items)
+
+
+def test_live_in_any_live_branch():
+    def compare(live, base, page):
+        return _commits(["m21", "m22"] if live == "main" else ["m22"])
+    items = github.collect(rel_fetch(compare), repos={"owner/rel": "REL"}, human="owner",
+                           agent_logins=AGENTS, live_branches={"owner/rel": ["main", "prod"]},
+                           lookback_days=14, now=NOW)
+    by = {i.external_id: i for i in items}
+    assert by["owner/rel#21"].live_at == github._iso(NOW)  # prod contains it; no release PR into prod
+    assert by["owner/rel#22"].live_at is None
+
+
 @pytest.mark.parametrize("code", [404, 422])
-def test_compare_404_is_not_contained(code):
-    def compare(sha, branch):
+def test_branch_compare_404_means_not_live(code):
+    def compare(live, base, page):
         raise github.GitHubHTTPError(code)
     items = rel_collect(rel_fetch(compare))
     assert items["owner/rel#21"].live_at is None and items["owner/rel#22"].live_at is None
+    assert items["owner/rel#30"].live_at == "2026-11-07T12:00:00Z"  # into main: unaffected
 
 
 def test_compare_500_fails_run():
-    def compare(sha, branch):
+    def compare(live, base, page):
         raise github.GitHubHTTPError(500)
     with pytest.raises(SourceError):
         rel_collect(rel_fetch(compare))
 
 
-def test_compare_budget_60():
-    prs = [_merged(100 + k, f"2026-11-{1 + k // 24:02d}T{k % 24:02d}:00:00Z", "development") for k in range(70)]
-    prs.reverse()  # the listing is newest-first; the budget goes to the oldest
-    seen = []
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "behind"}, prs=prs, seen=seen))
-    compared = [u.split("/compare/")[1].split("...")[0] for u in seen if "/compare/" in u]
-    assert compared == [f"m{100 + k}" for k in range(60)]
-    assert all(i.live_at is None for i in items.values())
-
-
-def test_compare_budget_is_per_run_across_repos():
-    prs = [_merged(100 + k, f"2026-11-{1 + k // 24:02d}T{k % 24:02d}:00:00Z", "development") for k in range(40)]
-    calls = []
-
-    def f(url):
-        if "/pulls?" in url:
-            return prs
-        calls.append(url)
-        return {"status": "behind"}
-    github.collect(f, repos={"owner/rel": "REL", "owner/rel2": "REL"}, human="owner", agent_logins=AGENTS,
-                   live_branches={"owner/rel": ["main"], "owner/rel2": ["main"]}, lookback_days=14, now=NOW)
-    assert len(calls) == 60
+def test_compare_unexpected_body_fails_run():
+    with pytest.raises(SourceError):
+        rel_collect(rel_fetch(lambda live, base, page: {"commits": "nope"}))
 
 
 def test_compare_skips_prs_merged_before_lookback():
     prs = [_merged(40, "2026-10-01T10:00:00Z", "development"), _merged(30, "2026-11-07T12:00:00Z", "main")]
     seen = []
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "ahead"}, prs=prs, seen=seen))
+    items = rel_collect(rel_fetch(none_missing, prs=prs, seen=seen))
     assert not any("/compare/" in u for u in seen)
     assert items["owner/rel#40"].live_at is None
 
 
-def test_compare_skipped_without_merge_commit_sha():
+def test_merged_pr_without_merge_sha_stays_not_live():
     prs = [_merged(21, "2026-11-05T10:00:00Z", "development", sha=""), REL_PRS[2]]
     seen = []
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "ahead"}, prs=prs, seen=seen))
+    items = rel_collect(rel_fetch(none_missing, prs=prs, seen=seen))
     assert not any("/compare/" in u for u in seen) and items["owner/rel#21"].live_at is None
+    prs = [_merged(21, "2026-11-05T10:00:00Z", "development", sha=""), REL_PRS[1], REL_PRS[2]]
+    items = rel_collect(rel_fetch(none_missing, prs=prs))
+    assert items["owner/rel#21"].live_at is None  # compared branch, but no sha to clear
+    assert items["owner/rel#22"].live_at is not None
+
+
+def test_compare_branch_names_are_quoted():
+    prs = [_merged(21, "2026-11-05T10:00:00Z", "feat/a b"), REL_PRS[2]]
+    seen = []
+    rel_collect(rel_fetch(none_missing, prs=prs, seen=seen))
+    assert [u for u in seen if "/compare/" in u] == [f"{REL}/compare/main...feat/a%20b?per_page=250&page=1"]
 
 
 def test_pr_into_live_branch_unchanged():
     seen = []
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "ahead"}, seen=seen))
+    items = rel_collect(rel_fetch(none_missing, seen=seen))
     for n, at in ((30, "2026-11-07T12:00:00Z"), (31, "2026-11-09T12:00:00Z")):
         assert items[f"owner/rel#{n}"].live_at == items[f"owner/rel#{n}"].merged_at == at
-        assert not any(f"/compare/m{n}..." in u for u in seen)
+    assert not any("...main?" in u for u in seen)
 
 
 def test_no_release_pr_found_uses_run_time():
-    items = rel_collect(rel_fetch(lambda sha, b: {"status": "identical"}))
+    items = rel_collect(rel_fetch(none_missing))
     i = items["owner/rel#22"]  # merged 2026-11-10, after every release PR in the listing
     assert i.live_at == "2026-11-13T08:00:00Z" == github._iso(NOW)  # the run time
     assert i.merged_at == "2026-11-10T10:00:00Z"
@@ -479,12 +545,12 @@ def _iso_at(ts):
     return github._iso(ts)
 
 
-def _pr(n, updated, state="closed", merged=True, draft=False):
+def _pr(n, updated, state="closed", merged=True, draft=False, base="main"):
     return {"number": n, "title": f"PR {n}", "state": state, "draft": draft,
             "merged_at": _iso_at(updated) if state == "closed" and merged else None,
             "merge_commit_sha": f"m{n}", "html_url": f"https://github.com/owner/busy/pull/{n}",
             "updated_at": _iso_at(updated), "user": {"login": "builder-bot"},
-            "head": {"sha": f"h{n}"}, "base": {"ref": "main"}}
+            "head": {"sha": f"h{n}"}, "base": {"ref": base}}
 
 
 def paged_fetch(prs, seen, per_page=100):
@@ -500,13 +566,15 @@ def paged_fetch(prs, seen, per_page=100):
             return {"total_count": 0, "check_runs": []}
         if "/reviews" in url:
             return []
+        if url.startswith(PAGED + "/compare/"):
+            return {"status": "ahead", "total_commits": 2, "commits": [{"sha": "m1950"}, {"sha": "x"}]}
         raise AssertionError(url)
     return f
 
 
-def paged_collect(fetch, lookback=14):
+def paged_collect(fetch, lookback=14, live=None):
     items = github.collect(fetch, repos={"owner/busy": "BUSY"}, human="owner", agent_logins=AGENTS,
-                           live_branches={}, lookback_days=lookback, now=NOW)
+                           live_branches=live or {}, lookback_days=lookback, now=NOW)
     return {i.external_id: i for i in items}
 
 
@@ -565,7 +633,8 @@ def test_all_prs_within_lookback_collected():
 
 
 def test_api_call_budget_for_164_pr_repo():
-    # 164 PRs inside the window: 12 open (8 ready, 4 draft), 130 merged, 22 closed unmerged
+    # 164 PRs inside the window: 12 open (8 ready, 4 draft), 120 merged into development,
+    # 10 release PRs merged into main, 22 closed unmerged
     prs = []
     for k in range(164):
         ts = NOW - 60 - k * 7000
@@ -573,18 +642,24 @@ def test_api_call_budget_for_164_pr_repo():
             prs.append(_pr(2000 - k, ts, state="open", merged=False))
         elif k < 12:
             prs.append(_pr(2000 - k, ts, state="open", merged=False, draft=True))
+        elif k < 132:
+            prs.append(_pr(2000 - k, ts, base="development"))
         elif k < 142:
             prs.append(_pr(2000 - k, ts))
         else:
             prs.append(_pr(2000 - k, ts, merged=False))
     prs += [_pr(100 - k, NOW - 15 * 86400 - k * 60) for k in range(80)]
     seen = []
-    paged_collect(paged_fetch(prs, seen))
+    items = paged_collect(paged_fetch(prs, seen), live={"owner/busy": ["main"]})
     listing = len(_listing_calls(seen))
     checks = sum("/check-runs" in u for u in seen)
     reviews = sum("/reviews" in u for u in seen)
+    compares = [u for u in seen if "/compare/" in u]
     # per-PR calls only for open, non-draft PRs; merged/closed PRs need neither (map_pr ignores them)
-    assert (listing, checks, reviews) == (2, 8, 8)
-    assert len(seen) == 18
-    # 10 such repos: 180 calls, plus at most 60 compare calls per run (D23a) -> 240, well under 1,000
-    assert 10 * len(seen) + github.COMPARE_BUDGET < 1000
+    # D23a: one compare per (repo, non-live base, live branch), not one per merged PR
+    assert (listing, checks, reviews, len(compares)) == (2, 8, 8, 1)
+    assert compares == [f"{PAGED}/compare/main...development?per_page=250&page=1"]
+    assert len(seen) == 19
+    assert sum(1 for i in items.values() if i.raw_status == "merged" and i.live_at is None) == 1
+    # 10 such repos: 190 calls per run, well under 1,000
+    assert 10 * len(seen) < 1000

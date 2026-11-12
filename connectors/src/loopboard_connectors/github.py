@@ -15,9 +15,8 @@ from .contract import Item, SourceError
 
 API = "https://api.github.com"
 TITLE_MAX = 300
-COMPARE_BUDGET = 60  # D23a: compare calls per run
-CONTAINED = {"ahead", "identical"}
-NOT_CONTAINED_HTTP = {404, 422}  # e.g. a deleted merge commit
+COMPARE_PER_PAGE = 250  # GitHub's maximum for the compare endpoint
+NOT_CONTAINED_HTTP = {404, 422}  # e.g. a deleted base branch
 FAILING = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
 
 
@@ -123,59 +122,67 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
 
 def _mark_released(fetch_json, items: list[Item], listings: dict[str, list[dict]], *,
                    live_branches: dict[str, list[str]], cutoff: int, now: int) -> list[Item]:
-    """D23a: a merged PR whose base is not live becomes live once a live branch contains its merge commit."""
+    """D23a: a merged PR whose base B is not live becomes live once a live branch L contains its merge commit.
+
+    One branch compare per (repo, B, L) lists the commits B has and L lacks; a PR is live in L iff its
+    merge_commit_sha is not among them.
+    """
     by_id = {i.external_id: k for k, i in enumerate(items)}
-    candidates = []  # (merged_at epoch, repo, pr)
-    releases: dict[str, list[tuple[float, str]]] = {}  # repo -> sorted (merged_at epoch, merged_at) into a live branch
     for repo, prs in listings.items():
         live = live_branches.get(repo, [])
         if not live:
             continue
-        rel = []
+        releases: dict[str, list[tuple[float, str]]] = {b: [] for b in live}  # L -> (merged_at epoch, iso)
+        candidates: dict[str, list[tuple[float, dict]]] = {}  # B -> [(merged_at epoch, pr)]
         for pr in prs:
             merged_at = pr.get("merged_at")
             if pr.get("state") != "closed" or not merged_at:
                 continue
-            if (pr.get("base") or {}).get("ref") in live:
-                rel.append((_epoch(merged_at), merged_at))
+            base = (pr.get("base") or {}).get("ref")
+            if base in live:
+                releases[base].append((_epoch(merged_at), merged_at))
             elif pr.get("merge_commit_sha") and f"{repo}#{pr['number']}" in by_id \
                     and _epoch(merged_at) >= cutoff:
-                candidates.append((_epoch(merged_at), repo, pr))
-        releases[repo] = sorted(rel)
-    candidates.sort(key=lambda c: c[0])  # oldest merged-not-live first
-    budget = COMPARE_BUDGET
-    for merged, repo, pr in candidates:
-        if budget <= 0:
-            break
-        contained = False
-        for branch in live_branches[repo]:
-            if budget <= 0:
-                break
-            budget -= 1
-            if _contains(fetch_json, repo, pr["merge_commit_sha"], branch):
-                contained = True
-                break
-        if not contained:
-            continue
-        later = [iso for t, iso in releases[repo] if t >= merged]
-        live_at = later[0] if later else _iso(now)
-        k = by_id[f"{repo}#{pr['number']}"]
-        items[k] = replace(items[k], live_at=live_at)
+                candidates.setdefault(base, []).append((_epoch(merged_at), pr))
+        for base, merged_prs in candidates.items():
+            live_at: dict[int, str] = {}
+            for branch in live:
+                missing = _missing_from(fetch_json, repo, branch, base)
+                if missing is None:  # 404/422: nothing into this base counts as live in this branch
+                    continue
+                rel = sorted(releases[branch])
+                for merged, pr in merged_prs:
+                    if pr["merge_commit_sha"] in missing:
+                        continue
+                    later = [iso for t, iso in rel if t >= merged]
+                    at = later[0] if later else _iso(now)
+                    if pr["number"] not in live_at or _epoch(at) < _epoch(live_at[pr["number"]]):
+                        live_at[pr["number"]] = at
+            for number, at in live_at.items():
+                k = by_id[f"{repo}#{number}"]
+                items[k] = replace(items[k], live_at=at)
     return items
 
 
-def _contains(fetch_json, repo: str, sha: str, branch: str) -> bool:
+def _missing_from(fetch_json, repo: str, live: str, base: str) -> set[str] | None:
+    """SHAs of commits on `base` that `live` lacks, or None if GitHub cannot compare the branches."""
     q = urllib.parse.quote
-    url = f"{API}/repos/{repo}/compare/{q(sha, safe='')}...{q(branch, safe='/')}?per_page=1"
-    try:
-        data = fetch_json(url)
-    except GitHubHTTPError as e:
-        if e.status in NOT_CONTAINED_HTTP:
-            return False
-        raise
-    if not isinstance(data, dict):
-        raise SourceError("unexpected GitHub response")
-    return data.get("status") in CONTAINED
+    url = f"{API}/repos/{repo}/compare/{q(live, safe='/')}...{q(base, safe='/')}?per_page={COMPARE_PER_PAGE}"
+    shas: set[str] = set()
+    for page in range(1, MAX_PAGES + 1):
+        try:
+            data = fetch_json(f"{url}&page={page}")
+        except GitHubHTTPError as e:
+            if e.status in NOT_CONTAINED_HTTP:
+                return None
+            raise
+        commits = data.get("commits") if isinstance(data, dict) else None
+        if not isinstance(commits, list):
+            raise SourceError("unexpected GitHub response")
+        shas.update(c["sha"] for c in commits)
+        if len(commits) < COMPARE_PER_PAGE:
+            return shas
+    raise SourceError("too many commits to compare")
 
 
 def _iso(ts: int) -> str:
