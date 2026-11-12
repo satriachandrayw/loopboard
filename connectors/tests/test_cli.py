@@ -123,7 +123,7 @@ def test_missing_config_exits_2(tmp_path, capsys):
     assert code == 2
 
 
-def test_token_never_printed(tmp_path, capsys):
+def test_token_never_printed(tmp_path, capsys, monkeypatch):
     def reject(url, body, headers):
         raise IngestRejected(403, f"forbidden {headers['Authorization']}")
 
@@ -136,6 +136,49 @@ def test_token_never_printed(tmp_path, capsys):
     for post in (Poster(), reject):
         code, out, err = run(tmp_path, capsys, post=post, env={"LB_TOKEN": TOKEN, "GITHUB_TOKEN": ghs})
         assert ghs not in out + err and TOKEN not in out + err
+    _check_real_hermes_child(tmp_path, capsys, monkeypatch)
+
+
+FAKE_HERMES = """#!{python}
+import json, os, sys
+fx = {fx!r}
+leak = " ".join(v for k, v in os.environ.items() if "TOKEN" in k)
+args = sys.argv[1:]
+if "list" in args:
+    data = json.load(open(os.path.join(fx, "list.json")))
+    for t in data:
+        t["title"] = (leak + " " + t["title"]).strip()
+else:
+    data = json.load(open(os.path.join(fx, "show-%s.json" % args[args.index("show") + 1])))
+print(json.dumps(data))
+"""
+
+
+def _check_real_hermes_child(tmp_path, capsys, monkeypatch):
+    """Token vars named HERMES_* reach neither output nor posted payloads through a real child:
+    the fake hermes echoes any *TOKEN* variable it receives into the task titles."""
+    import sys
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    h = bindir / "hermes"
+    h.write_text(FAKE_HERMES.format(python=sys.executable, fx=str(FIX)))
+    h.chmod(0o755)
+    ghs = "ghp_supersecretgithub"
+    monkeypatch.setenv("PATH", f"{bindir}:/usr/bin:/bin")
+    monkeypatch.setenv("HERMES_LB_TOKEN", TOKEN)
+    monkeypatch.setenv("HERMES_GH_TOKEN", ghs)
+    p = tmp_path / "config.toml"
+    p.write_text('[loopboard]\nurl = "https://lb.example.test/"\ntoken_env = "HERMES_LB_TOKEN"\n'
+                 '[github]\ntoken_env = "HERMES_GH_TOKEN"\n[kanban.tenants]\ndemo = "DEMO"\n')
+    post = Poster()
+    code = cli.main(["sync", "kanban", "--config", str(p)],
+                    env={"HERMES_LB_TOKEN": TOKEN, "HERMES_GH_TOKEN": ghs}, post=post)
+    out = capsys.readouterr()
+    assert code == 0 and summary(out.out)["collected"] == 8
+    posted = json.dumps([c[1] for c in post.calls])
+    for secret in (TOKEN, ghs):
+        assert secret not in out.out + out.err and secret not in posted
 
 
 def test_dry_run_posts_nothing(tmp_path, capsys):

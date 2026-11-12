@@ -31,7 +31,9 @@ def _sync_kanban(args, env, post, run_cli) -> int:
         if args.cli_replay:
             run_cli = kanban.replay_runner(args.cli_replay)
         else:
-            names = {cfg.get("loopboard", {}).get("token_env"), cfg.get("github", {}).get("token_env")}
+            # Every configured token var, plus GITHUB_TOKEN as the [github] default when unset.
+            names = {cfg.get("loopboard", {}).get("token_env"),
+                     cfg.get("github", {}).get("token_env") or "GITHUB_TOKEN"}
             exclude = tuple(n for n in names if n)
             run_cli = lambda argv: kanban.run_cli_subprocess(argv, exclude=exclude)  # noqa: E731
     kcfg = cfg.get("kanban", {})

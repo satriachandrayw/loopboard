@@ -251,3 +251,40 @@ def test_cli_passes_configured_token_names_to_child(monkeypatch, tmp_path):
     monkeypatch.setattr(kanban, "run_cli_subprocess", fake)
     cli.main(["sync", "kanban", "--config", str(cfg), "--dry-run"], env={"HERMES_LB_TOKEN": "t"})
     assert seen["exclude"] == {"HERMES_LB_TOKEN", "HERMES_GH_TOKEN"}
+
+
+def test_cli_excludes_default_github_token_when_section_absent(monkeypatch, tmp_path):
+    from loopboard_connectors import cli
+
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('[loopboard]\nurl = "http://localhost:1"\ntoken_env = "LB_TOKEN"\n[kanban.tenants]\n')
+    seen = {}
+
+    def fake(argv, *, exclude=()):
+        seen["exclude"] = set(exclude)
+        return "[]"
+
+    monkeypatch.setattr(kanban, "run_cli_subprocess", fake)
+    cli.main(["sync", "kanban", "--config", str(cfg), "--dry-run"], env={"GITHUB_TOKEN": "g"})
+    assert seen["exclude"] == {"LB_TOKEN", "GITHUB_TOKEN"}
+
+
+def test_hermes_named_github_token_absent_from_child_env(monkeypatch, tmp_path):
+    import subprocess
+    from loopboard_connectors import cli
+
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('[loopboard]\nurl = "http://localhost:1"\ntoken_env = "LB_TOKEN"\n'
+                   '[github]\ntoken_env = "HERMES_GH_TOKEN"\n[kanban.tenants]\n')
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["env"] = kw.get("env")
+        return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+
+    monkeypatch.setenv("HERMES_GH_TOKEN", "gh_secret")
+    monkeypatch.setenv("HERMES_HOME", "/x")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    cli.main(["sync", "kanban", "--config", str(cfg), "--dry-run"], env={})
+    assert "HERMES_GH_TOKEN" not in seen["env"]
+    assert seen["env"]["HERMES_HOME"] == "/x"
