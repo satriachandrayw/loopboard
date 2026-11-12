@@ -120,10 +120,10 @@ async def authenticate(request: Request, repo, *, access, jwks, verify_sig, now)
             "select name, scopes, source from api_tokens where token_hash = ? and revoked_at is null",
             (hash_token(token),),
         )
-        if row is None:
-            raise AuthError("invalid token")
-        scopes = frozenset(s.strip() for s in row["scopes"].split(",") if s.strip())
-        return Principal(row["name"], "token", scopes, row["source"])
+        if row is not None:
+            scopes = frozenset(s.strip() for s in row["scopes"].split(",") if s.strip())
+            return Principal(row["name"], "token", scopes, row["source"])
+        # invalid bearer: fall through to the Access path (e.g. a stale token header)
     jwt = request.headers.get("cf-access-jwt-assertion")
     if access is not None and jwt:
         if verify_sig is None:

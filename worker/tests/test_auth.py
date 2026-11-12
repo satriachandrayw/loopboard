@@ -306,3 +306,20 @@ def test_make_token_source_refused_with_read_or_write():
     for scopes in ("read", "write", "read,write", "ingest,read"):
         r = _mk("--scopes", scopes, "--source", "kanban")
         assert r.returncode != 0 and "TOKEN=" not in r.stdout, scopes
+
+
+async def test_invalid_bearer_falls_through_to_valid_access_jwt(make_app, client_for):
+    app, _ = access_app(make_app)
+    async with client_for(app) as c:
+        r = await c.get("/api/health", headers={**bearer("lb_stale"), "Cf-Access-Jwt-Assertion": sign(claims())})
+        assert r.status_code == 200
+        bad = {**bearer("lb_stale"), "Cf-Access-Jwt-Assertion": sign(claims(exp=NOW - 1))}
+        assert (await c.get("/api/health", headers=bad)).status_code == 401
+        assert (await c.get("/api/health", headers=bearer("lb_stale"))).status_code == 401
+
+
+async def test_invalid_bearer_does_not_use_access_when_disabled(make_app, client_for):
+    app, _ = access_app(make_app, access=None)
+    async with client_for(app) as c:
+        r = await c.get("/api/health", headers={**bearer("lb_stale"), "Cf-Access-Jwt-Assertion": sign(claims())})
+    assert r.status_code == 401
