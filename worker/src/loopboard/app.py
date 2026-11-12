@@ -26,6 +26,9 @@ def build_app(*, db=None, clock=None, access=None, jwks=None, verify_sig=None, f
 
     app.include_router(ingest_routes.router)
     app.include_router(writes_routes.router)
+    from loopboard.routes import reads as reads_routes
+
+    app.include_router(reads_routes.router)
     return app
 
 
