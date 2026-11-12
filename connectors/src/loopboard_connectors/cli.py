@@ -28,7 +28,12 @@ def _sync_kanban(args, env, post, run_cli) -> int:
         _emit({"connector": "kanban", "error": str(e)})
         return 2
     if run_cli is None:
-        run_cli = kanban.replay_runner(args.cli_replay) if args.cli_replay else kanban.run_cli_subprocess
+        if args.cli_replay:
+            run_cli = kanban.replay_runner(args.cli_replay)
+        else:
+            names = {cfg.get("loopboard", {}).get("token_env"), cfg.get("github", {}).get("token_env")}
+            exclude = tuple(n for n in names if n)
+            run_cli = lambda argv: kanban.run_cli_subprocess(argv, exclude=exclude)  # noqa: E731
     kcfg = cfg.get("kanban", {})
     human = cfg.get("general", {}).get("human", "owner")
     try:

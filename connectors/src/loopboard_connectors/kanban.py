@@ -100,15 +100,16 @@ def collect(run_cli: Callable[[list[str]], str], *, human: str, tenants: dict[st
     return items
 
 
-def _child_env() -> dict[str, str]:
-    """Minimal environment for the hermes child: never Loopboard or GitHub tokens."""
+def _child_env(exclude=()) -> dict[str, str]:
+    """Minimal environment for the hermes child: never Loopboard or GitHub tokens, including
+    the configured token variables even when their names start with HERMES_."""
     return {k: v for k, v in os.environ.items()
-            if k in ("PATH", "HOME", "LANG") or k.startswith("HERMES_")}
+            if (k in ("PATH", "HOME", "LANG") or k.startswith("HERMES_")) and k not in exclude}
 
 
-def run_cli_subprocess(argv: list[str]) -> str:
+def run_cli_subprocess(argv: list[str], *, exclude=()) -> str:
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=120, env=_child_env())
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=120, env=_child_env(exclude))
     except (OSError, subprocess.SubprocessError) as e:
         raise SourceError(f"cannot run {argv[0]}") from None
     if p.returncode != 0:
