@@ -47,6 +47,7 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
     out = {"accepted": len(items), "created": 0, "updated": 0, "skipped_older": 0}
     touched: set[int] = set()
     stmts: list = []
+    guarded: list[int] = []  # indexes of conditional update statements in stmts
     for it in items:
         ts = parse_ts(it.last_activity_at)
         stored = state.get(it.external_id)
@@ -88,11 +89,17 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
         if not changed:
             continue
         sets = ", ".join(f"{k} = ?" for k in changed)
+        # Conditional on the stored timestamp not having advanced since we read it; the event
+        # is only written when that update changed a row (changes() is per connection, so it
+        # reflects the update right above it in the same batch).
+        guarded.append(len(stmts))
         stmts += [
-            (f"update items set {sets}, updated_at = ? where source = ? and external_id = ?",
-             [*changed.values(), now, source, it.external_id]),
-            (EVENT + f"values(?, ?, ?, 'item', {ITEM_ID}, 'item.updated', ?)",
-             (now, actor, via, source, it.external_id, json.dumps(changed))),
+            (f"update items set {sets}, updated_at = ? where source = ? and external_id = ? "
+             "and last_activity_at <= ?",
+             [*changed.values(), now, source, it.external_id, ts]),
+            (EVENT + "select ?, ?, ?, 'item', id, 'item.updated', ? from items "
+             "where source = ? and external_id = ? and changes() > 0",
+             (now, actor, via, json.dumps(changed), source, it.external_id)),
         ]
         state[it.external_id] = {**stored, **changed}
         out["updated"] += 1
@@ -101,6 +108,10 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
                 touched.add(eid)
 
     if stmts:
-        await repo.batch(stmts)
+        changes = await repo.batch(stmts)
+        for i in guarded:
+            if i < len(changes) and changes[i] == 0:
+                out["updated"] -= 1
+                out["skipped_older"] += 1
     await recompute_epics(repo, touched, actor=actor, via=via, now=now)
     return out

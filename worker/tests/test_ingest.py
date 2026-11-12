@@ -274,3 +274,26 @@ async def test_out_of_range_timestamp_in_ingest_is_422(make_app, client_for):
     app, repo, t = await setup(make_app, client_for)
     r = await post(client_for, app, t, [item(last_activity_at="9999-12-31T23:59:59-14:00")])
     assert r.status_code == 422
+
+
+async def test_overlapping_update_never_regresses_and_writes_no_event(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await post(client_for, app, t, [item(title="A")])
+    n_events = len(await events(repo))
+    newer = parse_ts("2026-11-12T12:00:00+07:00")
+    app_repo = app.state.repo
+    orig = app_repo.batch
+
+    async def racing_batch(stmts):
+        # another writer advances the row between our read and our write
+        await repo.execute("update items set title='WINNER', last_activity_at=? where external_id='a'", (newer,))
+        return await orig(stmts)
+
+    app_repo.batch = racing_batch
+    r = await post(client_for, app, t, [item(title="LOSER", last_activity_at=T2)])
+    app_repo.batch = orig
+    assert r.status_code == 200
+    assert r.json()["skipped_older"] == 1 and r.json()["updated"] == 0
+    got = await row(repo)
+    assert got["title"] == "WINNER" and got["last_activity_at"] == newer
+    assert len(await events(repo)) == n_events

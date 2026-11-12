@@ -55,7 +55,15 @@ class Repo:
             rid = row["id"] if row else None
         return rid
 
-    async def batch(self, stmts) -> None:
-        """Run (sql, args) statements in one transaction; any failure rolls back all."""
+    async def batch(self, stmts) -> list:
+        """Run (sql, args) statements in one transaction; any failure rolls back all.
+
+        Returns meta.changes per statement (None where the binding gives none)."""
         bound = [self._stmt(sql, args) for sql, args in stmts]
-        await self.db.batch(bound)
+        results = _py(await self.db.batch(bound))
+        out = []
+        for res in results if results is not None else []:
+            res = _py(res)
+            meta = res.get("meta") if isinstance(res, dict) else getattr(res, "meta", None)
+            out.append(_meta_get(meta, "changes") if meta is not None else None)
+        return out
