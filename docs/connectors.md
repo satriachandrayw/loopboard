@@ -50,6 +50,14 @@ null; `next_step` is always null. Tenant maps to `project_key` through `[kanban.
 
 An unknown status fails the run.
 
+The title is truncated to 300 characters. An assignee that does not match the worker name
+pattern (`[A-Za-z0-9._-]{1,64}`) is treated as unassigned: `owner` is null and `waiting_on` falls
+back to `source:kanban` where it would have been the agent.
+
+Known limitation (parked): items are keyed by `(kanban, task id)`, so syncing two Kanban boards
+whose task ids overlap makes them collide and overwrite each other. Sync one board per Loopboard
+instance until board-qualified ids are added.
+
 ## GitHub pull requests
 
 ```

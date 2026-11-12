@@ -177,3 +177,19 @@ def test_replay_with_board_arg():
     assert json.loads(run(["hermes", "kanban", "--board", "b", "show", "2", "--json"]))["task"]["id"] == 2
     with pytest.raises(SourceError):
         run(["hermes", "kanban", "--board", "show", "--json"])
+
+
+def test_long_title_truncated_to_300():
+    t, s = mk("todo", title="x" * 301)
+    assert len(kanban.map_task(t, s, human="owner", tenants=TENANTS).title) == 300
+
+
+@pytest.mark.parametrize("bad", ["two words", "a" * 65, "bad/char", "x\n"])
+def test_invalid_assignee_falls_back(bad):
+    for status in ("todo", "running", "review", "done"):
+        t, s = mk(status, assignee=bad)
+        it = kanban.map_task(t, s, human="owner", tenants=TENANTS)
+        assert it.owner is None
+        assert it.waiting_on in (None, "human:owner", "source:kanban")
+    t, s = mk("running", assignee=bad)
+    assert kanban.map_task(t, s, human="owner", tenants=TENANTS).waiting_on == "source:kanban"

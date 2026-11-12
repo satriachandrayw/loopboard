@@ -3,6 +3,7 @@ comments, payload.reason) is never read."""
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -14,6 +15,9 @@ CATEGORY = {
     "triage": "todo", "todo": "todo", "ready": "todo", "running": "in_progress",
     "review": "review", "blocked": "blocked", "done": "done", "archived": "canceled",
 }
+
+
+_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 def _iso(epoch) -> str:
@@ -41,7 +45,7 @@ def map_task(task: dict, show: dict, *, human: str, tenants: dict[str, str]) -> 
         raise SourceError(f"unknown status: {status}")
     category = CATEGORY[status]
     assignee = task.get("assignee")
-    agent = f"agent:{assignee}" if assignee else None
+    agent = f"agent:{assignee}" if isinstance(assignee, str) and _NAME.fullmatch(assignee) else None
     events = _need(show, "events")
     reason = None
     if status in ("triage", "review"):
@@ -61,7 +65,7 @@ def map_task(task: dict, show: dict, *, human: str, tenants: dict[str, str]) -> 
     if not stamps:
         raise SourceError("no timestamps")
     return Item(
-        source="kanban", external_id=str(_need(task, "id")), title=_need(task, "title"), url=None,
+        source="kanban", external_id=str(_need(task, "id")), title=str(_need(task, "title"))[:300], url=None,
         status_category=category, raw_status=status,
         owner=agent, waiting_on=waiting, blocked_reason=reason, next_step=None,
         project_key=tenants.get(task.get("tenant")), epic_key=None,
