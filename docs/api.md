@@ -70,6 +70,9 @@ Epic card (its `column` is the derived board column, the only column field) plus
 
 ## Writes (scope `write`)
 
+Create, patch and confirm-done on an epic return the epic card as `GET /api/epics/{key}` shows it
+(its `epic` object: derived `column` only, no stored column fields).
+
 ### POST /api/projects
 
 Body: `{"key": "DEMO", "name": "Demo"}`; key matches `^[A-Z][A-Z0-9]{1,9}$`. 201, 409 if the

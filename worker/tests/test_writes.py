@@ -120,7 +120,7 @@ async def test_every_write_records_actor_and_via(make_app, client_for):
 async def test_patch_recomputes_board_column(make_app, client_for):
     app, repo, h = await seeded(make_app, client_for)
     r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"manual_column": "todo"})
-    assert r.json()["board_column"] == "todo"
+    assert r.json()["column"] == "todo"
     assert (await epic(repo))["board_column"] == "todo"
 
 
@@ -364,3 +364,21 @@ async def test_non_unique_integrity_error_is_not_409(make_app, client_for):
     except sqlite3.IntegrityError:
         return
     assert r.status_code != 409
+
+
+async def test_epic_write_responses_match_get_card(make_app, client_for):
+    app, repo = make_app(clock=lambda: NOW)
+    h = bearer(await add_token(repo, name="owner-tok", scopes="read,write"))
+    await mk_project(client_for, app, h)
+    created = await mk_epic(client_for, app, h)
+    patched = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"stage": "spec"})
+    done = await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done", {})
+    assert (created.status_code, patched.status_code, done.status_code) == (201, 200, 200)
+    get = await req(client_for, app, h, "GET", "/api/epics/DEMO-E1")
+    card = get.json()["epic"]
+    assert done.json() == card
+    for r in (created, patched, done):
+        body = r.json()
+        assert set(body) == set(card)
+        assert "board_column" not in body and "manual_column" not in body
+    assert patched.json()["stage"] == "spec" and done.json()["column"] == "done"

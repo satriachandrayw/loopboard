@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
-from loopboard import writes
+from loopboard import reads, writes
 from loopboard.app import get_now, get_repo
 from loopboard.auth import Principal, require
 from loopboard.model import (DeployedIn, EpicIn, EpicPatch, FilingIn, ProjectIn, RelationIn, SourceIn,
@@ -8,6 +8,11 @@ from loopboard.model import (DeployedIn, EpicIn, EpicPatch, FilingIn, ProjectIn,
 
 router = APIRouter()
 SOURCE_NAME = r"[a-z][a-z0-9_-]{1,31}"
+
+
+async def _card(repo, key: str, now: int) -> dict:
+    """The epic as GET /api/epics/{key} shows it: derived `column` only, no stored column fields."""
+    return (await reads.epic_detail(repo, key=key, now=now))["epic"]
 
 
 async def _run(coro):
@@ -30,13 +35,15 @@ async def create_project(body: ProjectIn, p: Principal = require("write"),
 @router.post("/api/projects/{project_key}/epics", status_code=201)
 async def create_epic(project_key: str, body: EpicIn, p: Principal = require("write"),
                       repo=Depends(get_repo), now: int = Depends(get_now)):
-    return await _run(writes.create_epic(repo, project_key=project_key, body=body, actor=p.name, now=now))
+    e = await _run(writes.create_epic(repo, project_key=project_key, body=body, actor=p.name, now=now))
+    return await _card(repo, e["key"], now)
 
 
 @router.patch("/api/epics/{key}")
 async def patch_epic(key: str, body: EpicPatch, p: Principal = require("write"),
                      repo=Depends(get_repo), now: int = Depends(get_now)):
-    return await _run(writes.patch_epic(repo, key=key, changes=body, actor=p.name, now=now))
+    e = await _run(writes.patch_epic(repo, key=key, changes=body, actor=p.name, now=now))
+    return await _card(repo, e["key"], now)
 
 
 @router.post("/api/epics/{key}/confirm-done")
@@ -47,7 +54,8 @@ async def confirm_done(key: str, request: Request, p: Principal = require("write
     ctype = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if ctype != "application/json":
         raise HTTPException(415, "Content-Type must be application/json")
-    return await _run(writes.confirm_done(repo, key=key, actor=p.name, now=now))
+    e = await _run(writes.confirm_done(repo, key=key, actor=p.name, now=now))
+    return await _card(repo, e["key"], now)
 
 
 @router.post("/api/items/{item_id}/filing")
