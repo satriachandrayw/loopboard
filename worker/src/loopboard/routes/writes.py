@@ -7,7 +7,7 @@ from loopboard.model import (DeployedIn, EpicIn, EpicPatch, FilingIn, ProjectIn,
                              ValidationError, parse_ts)
 
 router = APIRouter()
-SOURCE_NAME = r"^[a-z][a-z0-9_-]{1,31}$"
+SOURCE_NAME = r"[a-z][a-z0-9_-]{1,31}"
 
 
 async def _run(coro):
@@ -81,6 +81,6 @@ async def put_source(name: str, body: SourceIn, p: Principal = require("write"),
                      repo=Depends(get_repo), now: int = Depends(get_now)):
     import re
 
-    if not re.match(SOURCE_NAME, name):
+    if not re.fullmatch(SOURCE_NAME, name):
         raise HTTPException(422, "invalid source name")
     return await _run(writes.put_source(repo, name=name, stall_hours=body.stall_hours, actor=p.name, now=now))

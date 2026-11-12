@@ -287,3 +287,9 @@ async def test_confirm_done_requires_json_content_type(make_app, client_for):
                          headers={**h, "Content-Type": "application/json"})
         assert r.status_code == 200
     assert (await epic(repo))["done_confirmed_at"] == NOW
+
+
+async def test_put_source_rejects_trailing_newline_name(make_app, client_for):
+    app, _, h = await setup(make_app)
+    r = await req(client_for, app, h, "PUT", "/api/sources/kanban%0A", {"stall_hours": 6})
+    assert r.status_code == 422
