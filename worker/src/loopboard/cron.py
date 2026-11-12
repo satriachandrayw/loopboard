@@ -24,7 +24,7 @@ async def run_stall_transitions(repo, *, now: int) -> dict:
     for row in await load_epics(repo):
         e, items = row["epic"], row["items"]
         check("epics", "epic", e, epic_stalled(e, items, derive_epic(e, items, now), now, th))
-    for i in await repo.query("select * from items where filing != 'ignored' "
+    for i in await repo.query("select * from items where filing in ('epic', 'standalone') "
                               "or stalled_since is not null"):
         check("items", "item", i, item_stalled(i, now, th))
 

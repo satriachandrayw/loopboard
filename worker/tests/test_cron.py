@@ -33,3 +33,9 @@ async def test_cron_ignores_done_items(repo):
     await mk_item(repo, "3", None, "todo", filing="ignored", last=NOW - 100 * H)
     assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 0}
     assert await kinds(repo) == []
+
+
+async def test_cron_skips_unfiled_items(repo):
+    await mk_item(repo, "1", None, "todo", filing="unfiled", last=NOW - 100 * H)
+    assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 0}
+    assert await kinds(repo) == []

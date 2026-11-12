@@ -164,6 +164,8 @@ async def epic_detail(repo, *, key, now):
         if i["status_category"] == "canceled":
             continue
         cat = effective_category(i)
+        if cat == "backlog":
+            cat = "todo"
         tasks[cat].append({
             "id": i["id"], "ref": item_ref(i), "source": i["source"], "external_id": i["external_id"],
             "title": i["title"], "url": i["url"], "status_category": i["status_category"],
@@ -171,19 +173,15 @@ async def epic_detail(repo, *, key, now):
             "next_step": i["next_step"], "last_activity_at": i["last_activity_at"],
             "merged_at": i["merged_at"], "live_at": i["live_at"],
             "stalled": item_stalled(i, now, th)})
-    ids = [i["id"] for i in items]
-    marks = ",".join("?" * len(ids))
-    rel_sql = ("select * from relations where (from_type='epic' and from_id=?) or (to_type='epic' and to_id=?)")
-    rel_args = [e["id"], e["id"]]
-    ev_sql = "select * from events where (subject_type='epic' and subject_id=?)"
-    ev_args = [e["id"]]
-    if ids:
-        rel_sql += f" or (from_type='item' and from_id in ({marks})) or (to_type='item' and to_id in ({marks}))"
-        rel_args += ids + ids
-        ev_sql += f" or (subject_type='item' and subject_id in ({marks}))"
-        ev_args += ids
-    relations = await repo.query(rel_sql + " order by id", tuple(rel_args))
-    events = await repo.query(ev_sql + " order by at desc, id desc limit 50", tuple(ev_args))
+    sub = "select id from items where epic_id = ? and filing = 'epic'"
+    relations = await repo.query(
+        "select * from relations where (from_type='epic' and from_id=?) or (to_type='epic' and to_id=?) "
+        f"or (from_type='item' and from_id in ({sub})) or (to_type='item' and to_id in ({sub})) order by id",
+        (e["id"],) * 4)
+    events = await repo.query(
+        "select * from events where (subject_type='epic' and subject_id=?) "
+        f"or (subject_type='item' and subject_id in ({sub})) order by at desc, id desc limit 50",
+        (e["id"],) * 2)
     for ev in events:
         ev["payload"] = json.loads(ev["payload"])
     return {"epic": card, "tasks": tasks, "relations": relations, "events": events}

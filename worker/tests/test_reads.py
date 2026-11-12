@@ -228,3 +228,30 @@ async def test_epic_detail_unknown_key_is_404(make_app, client_for):
         for p in ("projects", "needs-you", "stalled", "unfiled"):
             assert (await c.get(f"/api/{p}", headers=bearer(t))).status_code == 200
         assert (await c.get("/api/board")).status_code == 401
+
+
+async def test_epic_detail_backlog_task_folds_into_todo(repo):
+    e = await mk_epic(repo)
+    await mk_item(repo, "1", e, "backlog")
+    d = await reads.epic_detail(repo, key="DEMO-E1", now=NOW)
+    assert [t["ref"] for t in d["tasks"]["todo"]] == ["kanban:1"]
+
+
+async def test_epic_detail_with_60_items_stays_under_param_cap(repo):
+    e = await mk_epic(repo)
+    ids = [await mk_item(repo, str(n), e, "todo") for n in range(60)]
+    await repo.execute("insert into relations(kind,from_type,from_id,to_type,to_id,created_at) "
+                       "values('blocks','item',?,'epic',999,1)", (ids[-1],))
+    await repo.execute("insert into events(at,actor,via,subject_type,subject_id,kind,payload) "
+                       "values(5,'x','api','item',?,'k','{}')", (ids[-1],))
+    seen = []
+    orig = repo.query
+
+    async def spy(sql, args=()):
+        seen.append(len(args))
+        return await orig(sql, args)
+
+    repo.query = spy
+    d = await reads.epic_detail(repo, key="DEMO-E1", now=NOW)
+    assert len(d["tasks"]["todo"]) == 60 and len(d["relations"]) == 1 and len(d["events"]) == 1
+    assert max(seen) <= 4
