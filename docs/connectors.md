@@ -75,9 +75,14 @@ Lists the 50 most recently updated pull requests per repo in `[github.repos]`, s
 | open, otherwise | Review | `human:<human>` |
 | merged | Review (merged, not live) | `human:<human>` |
 | merged into a `live_branches` base | Done (`live_at` = `merged_at`) | `human:<human>` |
+| merged elsewhere, and a `live_branches` branch contains the merge commit (D23a) | Done (`live_at` = the release PR's `merged_at`) | `human:<human>` |
 | closed, not merged | Canceled | none |
 
-Failing checks win over pending, pending over changes requested. Reviews decide only the changes-requested rule, using each reviewer's latest non-comment review. A merge into a branch not listed stays in Review until the item is marked deployed. Titles are cut at 300 characters.
+Failing checks win over pending, pending over changes requested. Reviews decide only the changes-requested rule, using each reviewer's latest non-comment review. A merge into a branch not listed stays in Review until a live branch contains it or the item is marked deployed.
+
+Releases (D23a): for each merged PR whose base is not a live branch, that has a `merge_commit_sha` and was merged within `lookback_days`, the connector asks `GET /repos/{repo}/compare/{merge_commit_sha}...{live_branch}`. A `status` of `ahead` or `identical` means the live branch contains the PR. Its `live_at` is then the `merged_at` of the earliest PR in the same listing merged into a live branch at or after the PR's own `merged_at` (the release PR, for example `development → main`), or the run time if the listing has none; `merged_at` is kept. A run makes at most 60 compare calls, oldest merged-not-live PRs first; the rest wait for a later run. A 404 or 422 from compare (for example a deleted commit) counts as not contained. Any other compare error fails the run, which posts nothing.
+
+Requests send `User-Agent: loopboard-connectors/<version>`, since Cloudflare's Browser Integrity Check rejects the default `Python-urllib` agent (error 1010). Titles are cut at 300 characters.
 
 ## CLI
 

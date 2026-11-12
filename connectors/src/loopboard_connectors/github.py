@@ -1,11 +1,13 @@
-"""GitHub pull request connector (read-only). Mapping rules: D19, D23, R10."""
+"""GitHub pull request connector (read-only). Mapping rules: D19, D23, D23a, R10."""
 from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from .client import USER_AGENT
@@ -13,7 +15,18 @@ from .contract import Item, SourceError
 
 API = "https://api.github.com"
 TITLE_MAX = 300
+COMPARE_BUDGET = 60  # D23a: compare calls per run
+CONTAINED = {"ahead", "identical"}
+NOT_CONTAINED_HTTP = {404, 422}  # e.g. a deleted merge commit
 FAILING = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
+
+
+class GitHubHTTPError(SourceError):
+    """GitHub answered with a non-2xx status."""
+
+    def __init__(self, status: int):
+        super().__init__(f"GitHub returned HTTP {status}")
+        self.status = status
 
 
 def _runs(checks) -> list[dict]:
@@ -83,10 +96,12 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
             live_branches: dict[str, list[str]], lookback_days: int, now: int) -> list[Item]:
     cutoff = now - lookback_days * 86400
     items: list[Item] = []
+    listings: dict[str, list[dict]] = {}
     for repo, project in repos.items():
         prs = fetch_json(f"{API}/repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=50")
         if not isinstance(prs, list):
             raise SourceError("unexpected GitHub response")
+        listings[repo] = prs
         for pr in prs:
             try:
                 if _epoch(pr["updated_at"]) < cutoff:
@@ -102,7 +117,71 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
                                     agent_logins=agent_logins, live_branches=live_branches.get(repo, [])))
             except (KeyError, TypeError, ValueError, AttributeError):
                 raise SourceError("unexpected GitHub response") from None
+    try:
+        return _mark_released(fetch_json, items, listings, live_branches=live_branches, cutoff=cutoff, now=now)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise SourceError("unexpected GitHub response") from None
+
+
+def _mark_released(fetch_json, items: list[Item], listings: dict[str, list[dict]], *,
+                   live_branches: dict[str, list[str]], cutoff: int, now: int) -> list[Item]:
+    """D23a: a merged PR whose base is not live becomes live once a live branch contains its merge commit."""
+    by_id = {i.external_id: k for k, i in enumerate(items)}
+    candidates = []  # (merged_at epoch, repo, pr)
+    releases: dict[str, list[tuple[float, str]]] = {}  # repo -> sorted (merged_at epoch, merged_at) into a live branch
+    for repo, prs in listings.items():
+        live = live_branches.get(repo, [])
+        if not live:
+            continue
+        rel = []
+        for pr in prs:
+            merged_at = pr.get("merged_at")
+            if pr.get("state") != "closed" or not merged_at:
+                continue
+            if (pr.get("base") or {}).get("ref") in live:
+                rel.append((_epoch(merged_at), merged_at))
+            elif pr.get("merge_commit_sha") and f"{repo}#{pr['number']}" in by_id \
+                    and _epoch(merged_at) >= cutoff:
+                candidates.append((_epoch(merged_at), repo, pr))
+        releases[repo] = sorted(rel)
+    candidates.sort(key=lambda c: c[0])  # oldest merged-not-live first
+    budget = COMPARE_BUDGET
+    for merged, repo, pr in candidates:
+        if budget <= 0:
+            break
+        contained = False
+        for branch in live_branches[repo]:
+            if budget <= 0:
+                break
+            budget -= 1
+            if _contains(fetch_json, repo, pr["merge_commit_sha"], branch):
+                contained = True
+                break
+        if not contained:
+            continue
+        later = [iso for t, iso in releases[repo] if t >= merged]
+        live_at = later[0] if later else _iso(now)
+        k = by_id[f"{repo}#{pr['number']}"]
+        items[k] = replace(items[k], live_at=live_at)
     return items
+
+
+def _contains(fetch_json, repo: str, sha: str, branch: str) -> bool:
+    q = urllib.parse.quote
+    url = f"{API}/repos/{repo}/compare/{q(sha, safe='')}...{q(branch, safe='/')}?per_page=1"
+    try:
+        data = fetch_json(url)
+    except GitHubHTTPError as e:
+        if e.status in NOT_CONTAINED_HTTP:
+            return False
+        raise
+    if not isinstance(data, dict):
+        raise SourceError("unexpected GitHub response")
+    return data.get("status") in CONTAINED
+
+
+def _iso(ts: int) -> str:
+    return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 MAX_PAGES = 20
@@ -156,10 +235,10 @@ def default_fetch_json(token: str, *, allowed_prefix: str = API + "/") -> Callab
         try:
             with opener.open(req, timeout=30) as resp:
                 if resp.status != 200:
-                    raise SourceError(f"GitHub returned HTTP {resp.status}")
+                    raise GitHubHTTPError(resp.status)
                 return json.loads(resp.read())
         except urllib.error.HTTPError as e:
-            raise SourceError(f"GitHub returned HTTP {e.code}") from None
+            raise GitHubHTTPError(e.code) from None
         except (urllib.error.URLError, OSError):
             raise SourceError("GitHub request failed") from None
         except ValueError:
