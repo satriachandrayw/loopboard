@@ -26,7 +26,24 @@ async def _by_key(repo, sql: str, keys) -> dict:
     return out
 
 
+def _lost_create_race(e: Exception) -> bool:
+    """A concurrent ingest created one of our items first. sqlite3 raises IntegrityError and D1 a JS
+    exception, both with this message."""
+    return "UNIQUE constraint failed: items.source, items.external_id" in str(e)
+
+
 async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, via: str, now: int) -> dict:
+    """Upsert items. The write batch is one transaction, so a lost create race rolls everything
+    back; it is retried once, re-reading state, so the raced item goes through the update path."""
+    try:
+        return await _ingest_once(repo, source=source, items=items, actor=actor, via=via, now=now)
+    except Exception as e:
+        if not _lost_create_race(e):
+            raise
+    return await _ingest_once(repo, source=source, items=items, actor=actor, via=via, now=now)
+
+
+async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, via: str, now: int) -> dict:
     # Reject far-future timestamps up front: nothing is written for the request.
     for it in items:
         for name in ("last_activity_at", "merged_at", "live_at"):

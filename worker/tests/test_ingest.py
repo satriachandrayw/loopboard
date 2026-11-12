@@ -314,3 +314,29 @@ async def test_far_future_timestamps_reject_whole_request(make_app, client_for):
         assert await row(repo, "good") is None and await row(repo, "bad") is None
     edge = await post(client_for, app, t, [item(last_activity_at=iso(NOW + 3600))])
     assert edge.status_code == 200
+
+
+async def test_concurrent_create_retries_as_update(make_app, client_for):
+    """Another writer creates the same (source, external_id) between our read and our batch: the
+    UNIQUE violation retries the request once, so the item is updated instead of a 500."""
+    app, repo, t = await setup(make_app, client_for)
+    orig = repo.batch
+    calls = []
+
+    async def racing_batch(stmts):
+        calls.append(len(stmts))
+        if len(calls) == 1:
+            await repo.execute(
+                "insert into items(source, external_id, title, status_category, waiting_on, filing,"
+                " last_activity_at, created_at, updated_at) values"
+                " ('kanban', 'a', 'Other', 'todo', 'agent:hermes', 'unfiled', ?, 1, 1)",
+                (parse_ts(T1),))
+        return await orig(stmts)
+
+    app.state.repo.batch = racing_batch
+    r = await post(client_for, app, t, [item(title="Mine", last_activity_at=T2)])
+    assert r.status_code == 200, r.text
+    assert (r.json()["created"], r.json()["updated"]) == (0, 1)
+    assert len(calls) == 2
+    assert (await row(repo))["title"] == "Mine"
+    assert [e["kind"] for e in await events(repo)] == ["item.updated"]
