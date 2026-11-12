@@ -1,9 +1,20 @@
 """Connector contract: read-only sources producing Items for POST /api/ingest."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, asdict
 
 ABILITIES = ("read",)
+
+# v1a.4: a title starting with "[DEMO-E5] " names the epic the item belongs to.
+EPIC_PREFIX = re.compile(r"^\s*\[([A-Z][A-Z0-9]{1,9}-E[0-9]+)\]\s*(.+)$")
+
+
+def split_epic_prefix(title: str) -> tuple[str | None, str]:
+    """Return (epic_key, title without the prefix), or (None, title) when the title does not start
+    with a well-formed [EPIC-KEY]. Only the leading position counts."""
+    m = EPIC_PREFIX.match(title)
+    return (m.group(1), m.group(2)) if m else (None, title)
 
 
 class SourceError(RuntimeError):

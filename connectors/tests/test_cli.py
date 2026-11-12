@@ -281,3 +281,16 @@ def test_kanban_allows_loopback_http_and_https(tmp_path, capsys, url):
     code = cli.main(["sync", "kanban", "--config", str(_with_url(tmp_path, url)),
                      "--cli-replay", str(FIX)], env={"LB_TOKEN": TOKEN}, post=post)
     assert code == 0 and len(post.calls) == 1
+
+
+def test_summary_carries_unknown_epic_defaulting_to_zero(tmp_path, capsys):
+    code, out, _ = run(tmp_path, capsys, post=Poster())
+    assert code == 0 and summary(out)["unknown_epic"] == 0
+
+    def post(url, body, headers):
+        n = len(json.loads(body)["items"])
+        return {"accepted": n, "created": n, "updated": 0, "skipped_older": 0, "unknown_epic": 2}
+    code, out, _ = run(tmp_path, capsys, post=post)
+    assert code == 0 and summary(out)["unknown_epic"] == 2
+    code, out, _ = run(tmp_path, capsys, "--dry-run")
+    assert summary(out)["unknown_epic"] == 0

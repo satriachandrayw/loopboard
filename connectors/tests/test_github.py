@@ -663,3 +663,23 @@ def test_api_call_budget_for_164_pr_repo():
     assert sum(1 for i in items.values() if i.raw_status == "merged" and i.live_at is None) == 1
     # 10 such repos: 190 calls per run, well under 1,000
     assert 10 * len(seen) < 1000
+
+
+# v1a.4: [EPIC-KEY] title prefix
+
+
+def _pr_titled(title):
+    pr = dict(json.loads((FIX / "pulls.json").read_text())[3], title=title)
+    return github.map_pr(pr, checks=[], reviews=[], project_key="DEMO", human="owner",
+                         agent_logins=AGENTS, live_branches=[])
+
+
+def test_title_prefix_sets_epic_key_and_strips_title():
+    i = _pr_titled("[DEMO-E5] Add checkout retry")
+    assert (i.epic_key, i.title) == ("DEMO-E5", "Add checkout retry")
+    assert i.to_payload()["epic_key"] == "DEMO-E5"
+
+
+def test_title_prefix_stripped_before_truncation():
+    i = _pr_titled("[DEMO-E5] " + "x" * 500)
+    assert i.epic_key == "DEMO-E5" and i.title == "x" * 300

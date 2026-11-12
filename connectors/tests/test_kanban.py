@@ -302,3 +302,21 @@ def test_missing_or_null_title_is_source_error(drop):
     with pytest.raises(SourceError, match="title"):
         kanban.collect(lambda argv: json.dumps([task] if "list" in argv else show),
                        human="owner", tenants=TENANTS, board=None)
+
+
+# v1a.4: [EPIC-KEY] title prefix
+
+
+def test_title_prefix_sets_epic_key_and_strips_title():
+    task, show = mk("todo", title="[DEMO-E5] Add checkout retry")
+    i = kanban.map_task(task, show, human="owner", tenants=TENANTS)
+    assert (i.epic_key, i.title) == ("DEMO-E5", "Add checkout retry")
+    task, show = mk("todo", title="  [AB2-E12]   Spaced out")
+    i = kanban.map_task(task, show, human="owner", tenants=TENANTS)
+    assert (i.epic_key, i.title) == ("AB2-E12", "Spaced out")
+
+
+def test_untagged_title_has_no_epic_key():
+    task, show = mk("todo", title="Plain task")
+    i = kanban.map_task(task, show, human="owner", tenants=TENANTS)
+    assert (i.epic_key, i.title) == (None, "Plain task")

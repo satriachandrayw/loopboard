@@ -7,7 +7,7 @@ import sys
 import time
 
 from . import github, kanban
-from .client import IngestClient
+from .client import COUNTS, IngestClient
 from .config import check_url, load_config, resolve_token
 from .contract import ConfigError, IngestRejected, SourceError
 
@@ -44,7 +44,7 @@ def _sync_kanban(args, env, post, run_cli) -> int:
     except SourceError as e:
         _emit({"connector": "kanban", "error": str(e)})
         return 1
-    totals = {"accepted": 0, "created": 0, "updated": 0, "skipped_older": 0}
+    totals = {k: 0 for k in COUNTS}
     posts = 0
     if items and not args.dry_run:
         client = IngestClient(url, token, post=post)
@@ -108,7 +108,7 @@ def _sync_github(args, env, post, fetch_json, now) -> int:
     except SourceError as e:
         _emit({"connector": "github", "error": _scrub(str(e), token, gtoken)})
         return 1
-    totals = {"accepted": 0, "created": 0, "updated": 0, "skipped_older": 0}
+    totals = {k: 0 for k in COUNTS}
     posts = 0
     if items and not args.dry_run:
         client = IngestClient(url, token, post=post)
