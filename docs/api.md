@@ -27,8 +27,18 @@ Body: `{"source": "kanban", "items": [Item, ...]}`, at most 100 items. `source` 
 required on open items), `blocked_reason` (`needs_input|other`), `next_step`, `project_key`,
 `epic_key`, `merged_at`, `live_at`. Absent `epic_key` leaves the item's filing unchanged.
 
-Response 200: `{"accepted","created","updated","skipped_older"}`. Ingest is idempotent; a payload
-older than the stored `last_activity_at` is skipped. 403 if the token is bound to another source or is an ingest token bound to no source.
+`epic_key` files the item under that epic (`filing` `epic`, project from the epic) only when the
+item is new or stored as `unfiled`. A stored `epic`, `standalone` or `ignored` filing is never
+overwritten by `epic_key`: a human or Hermes filing wins. Filing an existing unfiled item this way
+writes an `item.filed` event (the other changed fields go in `item.updated`); a new item's filing is
+in its `item.created` event. The epic's column is then recomputed. An `epic_key` naming no epic, or
+an epic whose manual column is `canceled`, is not an error: the item is ingested as if it had no
+`epic_key` (new items land in `unfiled`), it is counted in `unknown_epic`, and the rest of the
+request still commits. An unknown `project_key` is still 422 for the whole request.
+
+Response 200: `{"accepted","created","updated","skipped_older","unknown_epic"}`. `unknown_epic`
+counts the items whose `epic_key` was unknown or canceled (0 when none). Ingest is idempotent; a
+payload older than the stored `last_activity_at` is skipped. 403 if the token is bound to another source or is an ingest token bound to no source.
 See [connectors.md](connectors.md).
 
 ## Reads (scope `read`)

@@ -154,13 +154,6 @@ async def test_unknown_field_is_422(make_app, client_for):
     assert (await post(client_for, app, t, [item(body="secret")])).status_code == 422
 
 
-async def test_unknown_epic_key_is_422(make_app, client_for):
-    app, repo, t = await setup(make_app, client_for)
-    r = await post(client_for, app, t, [item(external_id="ok"), item(epic_key="DEMO-E9")])
-    assert r.status_code == 422
-    assert await row(repo, "ok") is None
-
-
 async def test_token_bound_to_other_source_is_403(make_app, client_for):
     app, repo, t = await setup(make_app, client_for, source="github")
     assert (await post(client_for, app, t, [item()], source="kanban")).status_code == 403
@@ -349,3 +342,111 @@ async def test_unbound_ingest_token_is_403(make_app, client_for):
     assert r.status_code == 403
     assert r.json()["detail"] == "connector tokens must be bound to a source"
     assert await row(repo) is None
+
+
+# v1a.4: filing by [EPIC-KEY] title tag (the connector sends it as epic_key)
+
+
+async def test_tag_files_new_item(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E5")
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5")])
+    assert r.status_code == 200 and r.json()["created"] == 1 and r.json()["unknown_epic"] == 0
+    x = await row(repo)
+    pid = (await repo.first("select project_id from epics where id=?", (eid,)))["project_id"]
+    assert (x["filing"], x["epic_id"], x["project_id"]) == ("epic", eid, pid)
+
+
+async def test_tag_files_unfiled_item(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E5")
+    await post(client_for, app, t, [item()])
+    assert (await row(repo))["filing"] == "unfiled"
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5", last_activity_at=T2)])
+    assert r.json()["updated"] == 1
+    x = await row(repo)
+    assert (x["filing"], x["epic_id"]) == ("epic", eid)
+
+
+async def test_tag_never_overrides_existing_filing(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    e1 = await mk_epic(repo, "DEMO-E1")
+    await mk_epic(repo, "DEMO-E5")
+    await repo.execute("insert into projects(key,name,created_at) values ('OTHER','o',1)")
+    other = (await repo.first("select id from projects where key='OTHER'"))["id"]
+    await post(client_for, app, t, [item(external_id=x, project_key="OTHER") for x in ("e", "s", "i")])
+    await repo.execute("update items set filing='epic', epic_id=?, project_id=(select project_id from epics where id=?)"
+                       " where external_id='e'", (e1, e1))
+    await repo.execute("update items set filing='standalone' where external_id='s'")
+    await repo.execute("update items set filing='ignored' where external_id='i'")
+    before = {x: dict(await row(repo, x)) for x in ("e", "s", "i")}
+    r = await post(client_for, app, t, [item(external_id=x, epic_key="DEMO-E5", title="New", last_activity_at=T2)
+                                        for x in ("e", "s", "i")])
+    assert r.status_code == 200 and r.json()["updated"] == 3
+    for x in ("e", "s", "i"):
+        after = await row(repo, x)
+        assert (after["filing"], after["epic_id"], after["project_id"]) == \
+            (before[x]["filing"], before[x]["epic_id"], before[x]["project_id"]), x
+        assert after["title"] == "New"
+    assert before["s"]["project_id"] == other
+    assert not [e for e in await events(repo) if e["kind"] == "item.filed"]
+
+
+async def test_unknown_epic_key_does_not_fail_chunk(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E5")
+    await post(client_for, app, t, [item(external_id="old")])
+    r = await post(client_for, app, t, [
+        item(external_id="ok"), item(external_id="new", epic_key="DEMO-E9"),
+        item(external_id="old", epic_key="DEMO-E9", title="Renamed", last_activity_at=T2),
+        item(external_id="tagged", epic_key="DEMO-E5")])
+    assert r.status_code == 200
+    assert {k: r.json()[k] for k in ("created", "updated", "unknown_epic")} == \
+        {"created": 3, "updated": 1, "unknown_epic": 2}
+    assert (await row(repo, "ok"))["filing"] == "unfiled"
+    assert ((await row(repo, "new"))["filing"], (await row(repo, "new"))["epic_id"]) == ("unfiled", None)
+    old = await row(repo, "old")
+    assert (old["filing"], old["title"]) == ("unfiled", "Renamed")
+    assert ((await row(repo, "tagged"))["filing"], (await row(repo, "tagged"))["epic_id"]) == ("epic", eid)
+
+
+async def test_canceled_epic_counts_as_unknown(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo, "DEMO-E5")
+    await repo.execute("update epics set manual_column='canceled' where key='DEMO-E5'")
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5")])
+    assert r.status_code == 200 and r.json()["unknown_epic"] == 1
+    x = await row(repo)
+    assert (x["filing"], x["epic_id"]) == ("unfiled", None)
+
+
+async def test_ingest_response_has_unknown_epic_zero_by_default(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    r = await post(client_for, app, t, [item()])
+    assert r.json()["unknown_epic"] == 0
+
+
+async def test_tag_filing_emits_event_and_recomputes(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E5")
+    await post(client_for, app, t, [item(status_category="in_progress")])
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5", status_category="in_progress",
+                                             last_activity_at=T2)])
+    assert r.json()["updated"] == 1
+    filed = [e for e in await events(repo) if e["kind"] == "item.filed"]
+    assert len(filed) == 1
+    (e,) = filed
+    assert (e["actor"], e["via"]) == ("bot", "ingest")
+    payload = json.loads(e["payload"])
+    assert (payload["filing"], payload["epic_id"]) == ("epic", eid)
+    assert (await repo.first("select board_column from epics where id=?", (eid,)))["board_column"] == "in_progress"
+    col = await repo.query("select * from events where subject_type='epic' and kind='epic.column_changed'")
+    assert len(col) == 1
+
+    # A new item filed by its tag: item.created carries the filing; the epic is recomputed too.
+    e2 = await mk_epic(repo, "DEMO-E6")
+    await post(client_for, app, t, [item(external_id="b", epic_key="DEMO-E6", status_category="review",
+                                         waiting_on="human:owner")])
+    created = json.loads((await events(repo))[-1]["payload"])
+    assert (created["filing"], created["epic_id"]) == ("epic", e2)
+    assert (await repo.first("select board_column from epics where id=?", (e2,)))["board_column"] == "review"

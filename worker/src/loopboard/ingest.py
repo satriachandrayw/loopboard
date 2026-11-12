@@ -50,13 +50,14 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
             v = getattr(it, name)
             if v is not None and parse_ts(v) > now + MAX_FUTURE_SECONDS:
                 raise ValidationError(f"{name} is more than 1 hour in the future (item {it.external_id})")
-    # Resolve every referenced epic/project before any write.
+    # Resolve every referenced epic/project before any write. An unknown or canceled epic is not an
+    # error (v1a.4): the item is ingested as if it had no epic_key and counted in unknown_epic.
     epic_keys = {it.epic_key for it in items if it.epic_key}
     project_keys = {it.project_key for it in items if it.project_key}
-    epics = await _by_key(repo, "select id, project_id, key from epics where key in ({})", epic_keys)
+    epics = {k: e for k, e in (await _by_key(
+        repo, "select id, project_id, key, manual_column from epics where key in ({})", epic_keys)).items()
+        if e["manual_column"] != "canceled"}
     projects = await _by_key(repo, "select id, key from projects where key in ({})", project_keys)
-    for k in sorted(epic_keys - epics.keys()):
-        raise ValidationError(f"unknown epic_key {k}")
     for k in sorted(project_keys - projects.keys()):
         raise ValidationError(f"unknown project_key {k}")
 
@@ -68,7 +69,8 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
                 [source, *part]):
             state[r["external_id"]] = r
 
-    out = {"accepted": len(items), "created": 0, "updated": 0, "skipped_older": 0}
+    out = {"accepted": len(items), "created": 0, "updated": 0, "skipped_older": 0,
+           "unknown_epic": sum(1 for it in items if it.epic_key and it.epic_key not in epics)}
     touched: set[int] = set()
     stmts: list = []
     guarded: list[int] = []  # indexes of conditional update statements in stmts
@@ -84,13 +86,14 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
         for k in ("merged_at", "live_at"):
             if getattr(it, k) is not None:
                 new[k] = parse_ts(getattr(it, k))
-        keeps_project = (stored is not None and stored["filing"] in ("epic", "standalone")
-                         and not it.epic_key)
+        # A tag files only a new or unfiled item; an epic, standalone or ignored filing (set by a
+        # human or Hermes) is never overwritten by one.
+        epic = epics.get(it.epic_key) if stored is None or stored["filing"] == "unfiled" else None
+        keeps_project = stored is not None and stored["filing"] in ("epic", "standalone")
         if it.project_key and not keeps_project:
             new["project_id"] = projects[it.project_key]["id"]
-        if it.epic_key:
-            e = epics[it.epic_key]
-            new.update(project_id=e["project_id"], epic_id=e["id"], filing="epic")
+        if epic is not None:
+            new.update(project_id=epic["project_id"], epic_id=epic["id"], filing="epic")
 
         if stored is None:
             new.setdefault("filing", "unfiled")
@@ -113,18 +116,25 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
         if not changed:
             continue
         sets = ", ".join(f"{k} = ?" for k in changed)
-        # Conditional on the stored timestamp not having advanced since we read it; the event
-        # is only written when that update changed a row (changes() is per connection, so it
-        # reflects the update right above it in the same batch).
+        # Filing by tag gets its own item.filed event; the other changes go in item.updated.
+        filed = {k: changed[k] for k in ("filing", "epic_id", "project_id") if k in changed} if epic else {}
+        events = [(kind, payload) for kind, payload in (
+            ("item.updated", {k: v for k, v in changed.items() if k not in filed}), ("item.filed", filed))
+            if payload]
+        # Conditional on the stored timestamp not having advanced since we read it; the events
+        # are only written when that update changed a row (changes() is per connection, so it
+        # reflects the statement right above it in the same batch: the update, then the first
+        # event insert, which inserted a row only if the update changed one).
         guarded.append(len(stmts))
-        stmts += [
+        stmts.append(
             (f"update items set {sets}, updated_at = ? where source = ? and external_id = ? "
              "and last_activity_at <= ?",
-             [*changed.values(), now, source, it.external_id, ts]),
-            (EVENT + "select ?, ?, ?, 'item', id, 'item.updated', ? from items "
+             [*changed.values(), now, source, it.external_id, ts]))
+        stmts += [
+            (EVENT + f"select ?, ?, ?, 'item', id, '{kind}', ? from items "
              "where source = ? and external_id = ? and changes() > 0",
-             (now, actor, via, json.dumps(changed), source, it.external_id)),
-        ]
+             (now, actor, via, json.dumps(payload), source, it.external_id))
+            for kind, payload in events]
         state[it.external_id] = {**stored, **changed}
         out["updated"] += 1
         for eid in (stored["epic_id"], changed.get("epic_id")):

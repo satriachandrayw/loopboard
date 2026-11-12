@@ -29,7 +29,31 @@ A connector reads one external source and pushes its items to Loopboard through
 At most 100 items per request; the runner splits larger listings. `epic_key` is omitted when
 unset so ingest keeps any existing filing. Open items need `waiting_on` of the form
 `agent:<name>`, `human:<name>` or `source:<name>`. The response is
-`{"accepted","created","updated","skipped_older"}`. A token bound to another source gets 403.
+`{"accepted","created","updated","skipped_older","unknown_epic"}`. A token bound to another source gets 403.
+
+## Filing by title prefix
+
+Both connectors file an item under an epic when its title (a Kanban card title or a GitHub PR
+title) starts with the epic key in square brackets. The title must match
+`^\s*\[([A-Z][A-Z0-9]{1,9}-E[0-9]+)\]\s*(.+)$`: the key becomes `epic_key` and the prefix is
+stripped from the stored title (before the 300-character cut).
+
+| Title | `epic_key` | Stored title |
+| --- | --- | --- |
+| `[DEMO-E5] Add checkout retry` | `DEMO-E5` | `Add checkout retry` |
+| `  [DEMO-E12]Fix login` | `DEMO-E12` | `Fix login` |
+| `Add checkout retry [DEMO-E5]` | none | unchanged |
+| `fix: [DEMO-E5] retry` | none | unchanged |
+| `[demo-e5] Add checkout retry` | none | unchanged |
+| `[DEMO5] Add checkout retry` | none | unchanged |
+
+Only the leading position counts, and lowercase or malformed keys are ignored. The title is the
+only source of an epic key: bodies, descriptions, labels and comments are never read.
+
+Ingest files a tagged item only when it is new or still `unfiled`. An existing filing always wins:
+an item a human or Hermes filed under an epic, as standalone or as ignored keeps that filing, even
+if its title later carries a different tag. An unknown key, or the key of a canceled epic, does not
+fail the sync: the item lands (or stays) in Unfiled and is counted in `unknown_epic`.
 
 ## Hermes Kanban mapping
 
@@ -94,7 +118,7 @@ loopboard sync github --config PATH [--dry-run]
 ```
 
 It prints one JSON summary line, for example
-`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"posts":1,"dry_run":false}`.
+`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"unknown_epic":0,"posts":1,"dry_run":false}`.
 `--cli-replay DIR` reads `list.json` and `show-<id>.json` from DIR instead of calling `hermes`.
 `--dry-run` collects and maps but posts nothing and needs no token.
 
