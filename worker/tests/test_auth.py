@@ -197,3 +197,96 @@ def test_make_token_prints_hash_not_token():
     assert "INSERT INTO api_tokens" in sql
     assert hash_token(token) in sql
     assert token not in sql
+
+
+# ---- negative JWT cases and JWKS fetching ---------------------------------
+
+def raw_jwt(header, payload, sig=b"x"):
+    h = b64(json.dumps(header).encode()) if not isinstance(header, bytes) else b64(header)
+    p = b64(json.dumps(payload).encode()) if not isinstance(payload, bytes) else b64(payload)
+    return f"{h}.{p}.{b64(sig)}"
+
+
+async def status_for(make_app, client_for, jwt, **kw):
+    app, _ = access_app(make_app)
+    async with client_for(app) as c:
+        return (await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": jwt})).status_code
+
+
+async def test_access_jwt_negative_cases_are_401(make_app, client_for):
+    good = claims()
+    cases = [
+        sign(claims(iss="https://evil.example.com")),
+        raw_jwt({"alg": "none", "kid": "k1"}, good),
+        raw_jwt({"alg": "HS256", "kid": "k1"}, good),
+        sign(good, kid="nope"),
+        raw_jwt({"alg": "RS256", "kid": ["k1"]}, good),
+        "a.b",
+        "a.b.c.d",
+        "!!!.@@@.###",
+        raw_jwt(b"not json", good),
+        sign({k: v for k, v in good.items() if k != "email"}),
+    ]
+    for jwt in cases:
+        assert await status_for(make_app, client_for, jwt) == 401, jwt
+
+
+def fake_fetch(keys, calls):
+    async def fetch(team):
+        calls.append(team)
+        if keys is None:
+            raise RuntimeError("down")
+        return keys
+
+    return fetch
+
+
+async def test_jwks_fetched_when_empty(make_app, client_for):
+    calls = []
+    app, _ = make_app(
+        access=ACCESS, verify_sig=rsa_verify, clock=lambda: NOW, fetch_certs=fake_fetch({"k1": jwk_of(KEY)}, calls)
+    )
+    async with client_for(app) as c:
+        r = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
+        r2 = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
+    assert (r.status_code, r2.status_code) == (200, 200)
+    assert calls == [ACCESS.team_domain]
+
+
+async def test_jwks_fetch_failure_is_401_but_bearer_still_works(make_app, client_for):
+    calls = []
+    app, repo = make_app(access=ACCESS, verify_sig=rsa_verify, clock=lambda: NOW, fetch_certs=fake_fetch(None, calls))
+    t = await add_token(repo)
+    async with client_for(app) as c:
+        r = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
+        r2 = await c.get("/api/health", headers={**bearer(t), "Cf-Access-Jwt-Assertion": sign(claims())})
+    assert r.status_code == 401
+    assert r2.status_code == 200
+    assert len(calls) == 1
+
+
+async def test_jwks_refetch_on_unknown_kid_throttled(make_app, client_for):
+    calls = []
+    now = [NOW]
+    new_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    keys = {"k1": jwk_of(KEY), "k2": {**jwk_of(new_key), "kid": "k2"}}
+    app, _ = make_app(
+        access=ACCESS, jwks={"k1": jwk_of(KEY)}, verify_sig=rsa_verify, clock=lambda: now[0],
+        fetch_certs=fake_fetch(keys, calls),
+    )
+    h = {"Cf-Access-Jwt-Assertion": sign(claims(), key=new_key, kid="k2")}
+    async with client_for(app) as c:
+        assert (await c.get("/api/health", headers=h)).status_code == 200
+        assert len(calls) == 1
+        bad = {"Cf-Access-Jwt-Assertion": sign(claims(), kid="k3")}
+        assert (await c.get("/api/health", headers=bad)).status_code == 401  # throttled
+        assert len(calls) == 1
+        now[0] += 61
+        assert (await c.get("/api/health", headers=bad)).status_code == 401
+        assert len(calls) == 2
+
+
+def test_make_token_rejects_unknown_scope():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "make_token.py"
+    r = subprocess.run([sys.executable, str(script), "--name", "b", "--scopes", "admin"], capture_output=True, text=True)
+    assert r.returncode != 0

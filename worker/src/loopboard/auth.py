@@ -47,7 +47,10 @@ def _b64d(s: str) -> bytes:
 async def verify_access_jwt(
     token: str, access: AccessConfig, *, jwks: dict, now: int, verify_sig: Callable
 ) -> dict:
-    """jwks maps kid -> JWK. verify_sig may be sync or async."""
+    """jwks maps kid -> JWK, or is an async getter `(refresh: bool) -> dict`.
+
+    The getter is called only here (Access branch); on an unknown kid it is
+    called again with refresh=True. verify_sig may be sync or async."""
     parts = token.split(".")
     if len(parts) != 3:
         raise AuthError("malformed jwt")
@@ -61,7 +64,16 @@ async def verify_access_jwt(
         raise AuthError("malformed jwt")
     if header.get("alg") != "RS256":
         raise AuthError("bad alg")
-    jwk = jwks.get(header.get("kid"))
+    kid = header.get("kid")
+    if not isinstance(kid, str):
+        raise AuthError("bad kid")
+    if callable(jwks):
+        table = await jwks(False)
+        if kid not in table:
+            table = await jwks(True)
+    else:
+        table = jwks
+    jwk = table.get(kid)
     if jwk is None:
         raise AuthError("unknown kid")
     if claims.get("iss") != f"https://{access.team_domain}":
@@ -76,7 +88,7 @@ async def verify_access_jwt(
     ok = verify_sig(f"{parts[0]}.{parts[1]}".encode(), signature, jwk)
     if inspect.isawaitable(ok):
         ok = await ok
-    if not ok:
+    if ok is not True:
         raise AuthError("bad signature")
     return claims
 
@@ -133,7 +145,7 @@ def require(scope: str):
                 request,
                 appmod.get_repo(request),
                 access=appmod.get_access(request),
-                jwks=await appmod.get_jwks(request),
+                jwks=lambda refresh=False: appmod.get_jwks(request, refresh),
                 verify_sig=appmod.get_verify_sig(request),
                 now=appmod.get_now(request),
             )

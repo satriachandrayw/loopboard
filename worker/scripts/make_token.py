@@ -19,6 +19,10 @@ def main():
     ap.add_argument("--scopes", required=True)
     ap.add_argument("--source")
     a = ap.parse_args()
+    scopes = [x.strip() for x in a.scopes.split(",")]
+    if not scopes or not set(scopes) <= {"ingest", "read", "write"}:
+        ap.error("scopes must be a comma list of ingest, read, write")
+    a.scopes = ",".join(scopes)
     token, h = new_token()
     print(f"TOKEN={token}")
     print(
