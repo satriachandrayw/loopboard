@@ -6,6 +6,8 @@ from .derive import derive_epic
 
 async def recompute_epic(repo, epic_id: int, *, actor: str, via: str, now: int) -> str:
     epic = await repo.first("select * from epics where id = ?", (epic_id,))
+    if epic is None:
+        raise LookupError(f"epic {epic_id} not found")
     items = await repo.query("select * from items where epic_id = ?", (epic_id,))
     new = derive_epic(epic, items, now).board_column
     old = epic["board_column"]

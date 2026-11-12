@@ -26,6 +26,7 @@ CASES = [
     ("merged and live", ep(), [it("review", merged=1, live=2)], "done", [], None),
     ("all done with code", ep(), [it("done", merged=1, live=2), it("done")], "done", [], None),
     ("done no code", ep(), [it("done")], "review", ["awaiting_confirmation"], "human"),
+    ("done merged not live", ep(), [it("done", merged=1)], "done", ["merged_not_live"], None),
     ("done confirmed", ep(confirmed=5), [it("done")], "done", [], None),
     ("empty todo", ep("todo"), [], "todo", [], None),
     ("empty backlog", ep("backlog"), [], "backlog", [], None),

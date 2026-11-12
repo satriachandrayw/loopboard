@@ -53,6 +53,10 @@ def test_epic_not_stalled_when_an_open_task_moved_recently():
 
 def test_empty_todo_epic_uses_own_activity():
     assert stalled(ep(age_h=25), []) is True
+    assert stalled(ep(age_h=24), []) is False
+    e = ep(age_h=24)
+    e["last_activity_at"] -= 1
+    assert stalled(e, []) is True
     assert stalled(ep(age_h=1), []) is False
 
 

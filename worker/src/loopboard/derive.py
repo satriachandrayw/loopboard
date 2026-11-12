@@ -45,7 +45,7 @@ def derive_epic(epic: dict, items: list[dict], now: int) -> Derived:
         flags.append("blocked")
         if any(i.get("blocked_reason") == "needs_input" for i in blocked):
             flags.append("blocked_needs_input")
-    if any(i.get("merged_at") and not i.get("live_at") and c != "done" for i, c in tasks):
+    if any(i.get("merged_at") and not i.get("live_at") for i, _ in tasks):
         flags.append("merged_not_live")
 
     confirmed = bool(epic.get("done_confirmed_at"))
