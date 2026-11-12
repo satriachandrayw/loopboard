@@ -8,7 +8,7 @@ import time
 
 from . import github, kanban
 from .client import IngestClient
-from .config import load_config, resolve_token
+from .config import check_url, load_config, resolve_token
 from .contract import ConfigError, IngestRejected, SourceError
 
 
@@ -22,6 +22,7 @@ def _sync_kanban(args, env, post, run_cli) -> int:
         url = cfg.get("loopboard", {}).get("url")
         if not url:
             raise ConfigError("[loopboard] url is not set")
+        check_url(url)
         token = None if args.dry_run else resolve_token(cfg, env)
     except ConfigError as e:
         _emit({"connector": "kanban", "error": str(e)})
@@ -64,6 +65,7 @@ def _sync_github(args, env, post, fetch_json, now) -> int:
         url = cfg.get("loopboard", {}).get("url")
         if not url:
             raise ConfigError("[loopboard] url is not set")
+        check_url(url)
         token = None if args.dry_run else resolve_token(cfg, env)
         gcfg = cfg.get("github", {})
         gname = gcfg.get("token_env")

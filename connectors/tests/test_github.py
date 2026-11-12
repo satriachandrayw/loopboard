@@ -250,3 +250,21 @@ def test_redirect_off_host_raises_and_never_forwards_token():
     finally:
         target.shutdown()
         redir.shutdown()
+
+
+def test_github_refuses_non_https_remote(tmp_path, capsys):
+    p = cfg(tmp_path)
+    p.write_text(p.read_text().replace("https://lb.example.test/", "http://lb.example.test/"))
+    post = Poster()
+    code = cli.main(["sync", "github", "--config", str(p)],
+                    env={"LB_TOKEN": TOKEN, "GH_TOKEN": GH_TOKEN}, post=post, fetch_json=fake_fetch)
+    assert code == 2 and post.calls == []
+
+
+def test_github_allows_localhost_http(tmp_path, capsys):
+    p = cfg(tmp_path)
+    p.write_text(p.read_text().replace("https://lb.example.test/", "http://localhost:8799"))
+    post = Poster()
+    code = cli.main(["sync", "github", "--config", str(p)],
+                    env={"LB_TOKEN": TOKEN, "GH_TOKEN": GH_TOKEN}, post=post, fetch_json=fake_fetch)
+    assert code == 0

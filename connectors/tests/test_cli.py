@@ -204,3 +204,30 @@ def test_redirect_not_followed_and_token_not_forwarded():
         _urllib_post(f"http://127.0.0.1:{red.server_port}/api/ingest", b"{}", {"Authorization": "Bearer t"})
     assert e.value.status == 307 and seen == []
     tgt.shutdown(); red.shutdown()
+
+
+def _with_url(tmp_path, url):
+    p = cfg(tmp_path)
+    p.write_text(p.read_text().replace("https://lb.example.test/", url))
+    return p
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("url", ["http://lb.example.test/", "http://localhost.evil.test/",
+                                 "ftp://localhost/", "http://127.0.0.1.evil.test/"])
+def test_kanban_refuses_non_https_remote(tmp_path, capsys, url):
+    post = Poster()
+    code = cli.main(["sync", "kanban", "--config", str(_with_url(tmp_path, url)),
+                     "--cli-replay", str(FIX)], env={"LB_TOKEN": TOKEN}, post=post)
+    assert code == 2 and post.calls == []
+    assert TOKEN not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("url", ["http://localhost:8799", "http://127.0.0.1:8799/", "https://lb.example.test/"])
+def test_kanban_allows_loopback_http_and_https(tmp_path, capsys, url):
+    post = Poster()
+    code = cli.main(["sync", "kanban", "--config", str(_with_url(tmp_path, url)),
+                     "--cli-replay", str(FIX)], env={"LB_TOKEN": TOKEN}, post=post)
+    assert code == 0 and len(post.calls) == 1

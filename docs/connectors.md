@@ -100,7 +100,7 @@ It prints one JSON summary line, for example
 
 ## Config keys
 
-- `[loopboard] url`: base URL; posts go to `<url>/api/ingest`.
+- `[loopboard] url`: base URL; posts go to `<url>/api/ingest`. Must be `https://`; plain `http://` is accepted only for `localhost` and `127.0.0.1` (otherwise exit 2).
 - `[loopboard] token_env`: name of the environment variable holding the bearer token.
 - `[general] human`: name used in `human:<human>` (for example `owner`).
 - `[kanban] board`: optional Hermes board slug.
