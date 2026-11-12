@@ -4,8 +4,9 @@ import argparse
 import json
 import os
 import sys
+import time
 
-from . import kanban
+from . import github, kanban
 from .client import IngestClient
 from .config import load_config, resolve_token
 from .contract import ConfigError, IngestRejected, SourceError
@@ -50,7 +51,62 @@ def _sync_kanban(args, env, post, run_cli) -> int:
     return 0
 
 
-def main(argv=None, *, env=os.environ, post=None, run_cli=None) -> int:
+def _scrub(msg: str, *secrets) -> str:
+    for s in secrets:
+        if s:
+            msg = msg.replace(s, "***")
+    return msg
+
+
+def _sync_github(args, env, post, fetch_json, now) -> int:
+    try:
+        cfg = load_config(args.config)
+        url = cfg.get("loopboard", {}).get("url")
+        if not url:
+            raise ConfigError("[loopboard] url is not set")
+        token = None if args.dry_run else resolve_token(cfg, env)
+        gcfg = cfg.get("github", {})
+        gname = gcfg.get("token_env")
+        if not gname:
+            raise ConfigError("[github] token_env is not configured")
+        gtoken = env.get(gname)
+        if not gtoken:
+            raise ConfigError("GitHub token environment variable is not set")
+        repos = gcfg.get("repos", {})
+        if not repos:
+            raise ConfigError("[github.repos] is empty")
+        lookback = gcfg.get("lookback_days", 14)
+        if not isinstance(lookback, int) or isinstance(lookback, bool) or lookback < 1:
+            raise ConfigError("[github] lookback_days must be a positive integer")
+    except ConfigError as e:
+        _emit({"connector": "github", "error": str(e)})
+        return 2
+    if fetch_json is None:
+        fetch_json = github.default_fetch_json(gtoken)
+    human = cfg.get("general", {}).get("human", "owner")
+    try:
+        items = github.collect(fetch_json, repos=repos, human=human, agent_logins=gcfg.get("agents", {}),
+                               live_branches=gcfg.get("live_branches", {}), lookback_days=lookback,
+                               now=int(time.time()) if now is None else now)
+    except SourceError as e:
+        _emit({"connector": "github", "error": _scrub(str(e), token, gtoken)})
+        return 1
+    totals = {"accepted": 0, "created": 0, "updated": 0, "skipped_older": 0}
+    posts = 0
+    if items and not args.dry_run:
+        client = IngestClient(url, token, post=post)
+        try:
+            totals = client.send("github", items)
+        except IngestRejected as e:
+            _emit({"connector": "github", "error": f"ingest rejected (HTTP {e.status})"})
+            return 3
+        posts = client.posts
+    _emit({"connector": "github", "collected": len(items), **totals, "posts": posts,
+           "dry_run": bool(args.dry_run)})
+    return 0
+
+
+def main(argv=None, *, env=os.environ, post=None, run_cli=None, fetch_json=None, now=None) -> int:
     p = argparse.ArgumentParser(prog="loopboard")
     sub = p.add_subparsers(dest="cmd", required=True)
     sp = sub.add_parser("sync").add_subparsers(dest="connector", required=True)
@@ -59,7 +115,12 @@ def main(argv=None, *, env=os.environ, post=None, run_cli=None) -> int:
     k.add_argument("--board")
     k.add_argument("--cli-replay", metavar="DIR")
     k.add_argument("--dry-run", action="store_true")
+    g = sp.add_parser("github")
+    g.add_argument("--config", required=True)
+    g.add_argument("--dry-run", action="store_true")
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.connector == "github":
+        return _sync_github(args, env, post, fetch_json, now)
     return _sync_kanban(args, env, post, run_cli)
 
 

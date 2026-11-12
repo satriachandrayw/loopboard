@@ -1,0 +1,182 @@
+[
+ {
+  "number": 1,
+  "title": "Draft work",
+  "state": "open",
+  "draft": true,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/1",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "sha1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 2,
+  "title": "Failing CI",
+  "state": "open",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/2",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "fail1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 3,
+  "title": "Pending CI",
+  "state": "open",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/3",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "pend1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 4,
+  "title": "Green PR",
+  "state": "open",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/4",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "green1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 5,
+  "title": "Merged to develop",
+  "state": "closed",
+  "draft": false,
+  "merged_at": "2026-11-11T10:00:00Z",
+  "html_url": "https://github.com/owner/app/pull/5",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "sha5"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 6,
+  "title": "Merged to main",
+  "state": "closed",
+  "draft": false,
+  "merged_at": "2026-11-11T11:00:00Z",
+  "html_url": "https://github.com/owner/app/pull/6",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "sha6"
+  },
+  "base": {
+   "ref": "main"
+  }
+ },
+ {
+  "number": 7,
+  "title": "Closed unmerged",
+  "state": "closed",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/7",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "sha7"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 8,
+  "title": "Unmapped author",
+  "state": "open",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/8",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "stranger"
+  },
+  "head": {
+   "sha": "green1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 9,
+  "title": "Old PR",
+  "state": "closed",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/9",
+  "updated_at": "2026-01-01T00:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "sha9"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ },
+ {
+  "number": 10,
+  "title": "Changes requested",
+  "state": "open",
+  "draft": false,
+  "merged_at": null,
+  "html_url": "https://github.com/owner/app/pull/10",
+  "updated_at": "2026-11-12T08:00:00Z",
+  "user": {
+   "login": "builder-bot"
+  },
+  "head": {
+   "sha": "green1"
+  },
+  "base": {
+   "ref": "develop"
+  }
+ }
+]

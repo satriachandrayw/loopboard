@@ -12,3 +12,16 @@ human = "owner"
 
 [kanban.tenants]         # Hermes tenant -> Loopboard project key
 demo = "DEMO"
+
+[github]
+token_env = "GITHUB_TOKEN"   # env var holding a read-only GitHub token
+lookback_days = 14           # skip PRs not updated within this many days
+
+[github.repos]               # GitHub repo -> Loopboard project key
+"owner/app" = "DEMO"
+
+[github.agents]              # GitHub login -> agent name (PR author)
+builder-bot = "builder"
+
+[github.live_branches]       # PRs merged into these base branches count as live
+"owner/app" = ["main"]

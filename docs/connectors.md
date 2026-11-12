@@ -52,12 +52,30 @@ An unknown status fails the run.
 
 ## GitHub pull requests
 
-(Filled in by the GitHub connector task.)
+```
+loopboard sync github --config PATH [--dry-run]
+```
+
+Lists the 50 most recently updated pull requests per repo in `[github.repos]`, skips those not updated within `lookback_days` (default 14), and posts them as source `github`. The GitHub token comes from the variable named by `[github] token_env`; the Loopboard token from `[loopboard] token_env`. Neither is printed. `[github.agents]` maps a PR author login to an agent name; `[github.live_branches]` lists, per repo, base branches whose merges are live.
+
+| PR state | Column | waiting_on |
+|---|---|---|
+| draft | In progress | `agent:<mapped author>` (unmapped: `human:<human>`) |
+| open, any completed check-run failed (failure, timed_out, cancelled, action_required, startup_failure) | Review | `agent:<author>` (unmapped: `human:<human>`) |
+| open, any check-run not completed | Review | `source:CI` |
+| open, latest review of any reviewer is CHANGES_REQUESTED | Review | `agent:<author>` (unmapped: `human:<human>`) |
+| open, otherwise | Review | `human:<human>` |
+| merged | Review (merged, not live) | `human:<human>` |
+| merged into a `live_branches` base | Done (`live_at` = `merged_at`) | `human:<human>` |
+| closed, not merged | Canceled | none |
+
+Failing checks win over pending, pending over changes requested. Reviews decide only the changes-requested rule, using each reviewer's latest non-comment review. A merge into a branch not listed stays in Review until the item is marked deployed. Titles are cut at 300 characters.
 
 ## CLI
 
 ```
 loopboard sync kanban --config PATH [--board SLUG] [--cli-replay DIR] [--dry-run]
+loopboard sync github --config PATH [--dry-run]
 ```
 
 It prints one JSON summary line, for example
