@@ -194,7 +194,9 @@ async def test_epic_detail_groups_tasks_into_five_groups(repo):
     assert list(t) == ["todo", "in_progress", "blocked", "review", "done"]
     assert [len(t[g]) for g in t] == [2, 1, 1, 1, 2]
     assert d["epic"]["key"] == "DEMO-E1" and d["epic"]["goal"] is None
-    assert d["epic"]["board_column"] == "todo"
+    assert "board_column" not in d["epic"]
+    # stored column is todo (stale); the response carries only the derived one
+    assert d["epic"]["column"] == "in_progress"
     assert len(d["relations"]) == 1
 
 

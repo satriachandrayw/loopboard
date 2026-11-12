@@ -64,7 +64,7 @@ Non-canceled items that are not yet filed. 200.
 
 ### GET /api/epics/{key}
 
-Epic card plus `goal`, links, `tasks` grouped by column, `relations` and the newest 50 `events`.
+Epic card (its `column` is the derived board column, the only column field) plus `goal`, links, `tasks` grouped by column, `relations` and the newest 50 `events`.
 200, or 404 if the epic does not exist.
 
 ## Writes (scope `write`)

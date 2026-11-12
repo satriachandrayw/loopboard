@@ -158,7 +158,6 @@ async def epic_detail(repo, *, key, now):
     d = derive_epic(e, items, now)
     card = _card(e, items, d, now, th)
     card.update({k: e[k] for k in ("goal", "next_step", "home_url", "spec_url", "plan_url")})
-    card["board_column"] = e["board_column"]
     tasks = {g: [] for g in TASK_GROUPS}
     for i in items:
         if i["status_category"] == "canceled":
