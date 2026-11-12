@@ -8,7 +8,7 @@ def threshold_hours(thresholds: dict[str, float], source: str) -> float:
 
 
 ITEMS_FOR_STALL = (
-    "select i.*, e.manual_column as epic_manual_column from items i "
+    "select i.*, e.manual_column as epic_manual_column, e.project_id as epic_project_id from items i "
     "left join epics e on e.id = i.epic_id where i.filing in ('epic', 'standalone')")
 
 

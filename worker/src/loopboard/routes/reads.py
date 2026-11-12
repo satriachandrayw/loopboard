@@ -22,19 +22,21 @@ async def board(project: str | None = None, waiting_on: Group | None = None,
 
 
 @router.get("/api/needs-you")
-async def needs_you(p: Principal = require("read"), repo=Depends(get_repo), now: int = Depends(get_now)):
-    return await reads.needs_you(repo, now=now)
+async def needs_you(project: str | None = None, p: Principal = require("read"), repo=Depends(get_repo),
+                    now: int = Depends(get_now)):
+    return await reads.needs_you(repo, now=now, project_key=project)
 
 
 @router.get("/api/stalled")
-async def stalled(waiting_on: Group | None = None, p: Principal = require("read"),
+async def stalled(waiting_on: Group | None = None, project: str | None = None, p: Principal = require("read"),
                   repo=Depends(get_repo), now: int = Depends(get_now)):
-    return await reads.stalled(repo, now=now, waiting_on=waiting_on)
+    return await reads.stalled(repo, now=now, waiting_on=waiting_on, project_key=project)
 
 
 @router.get("/api/unfiled")
-async def unfiled(p: Principal = require("read"), repo=Depends(get_repo), now: int = Depends(get_now)):
-    return await reads.unfiled(repo, now=now)
+async def unfiled(project: str | None = None, p: Principal = require("read"), repo=Depends(get_repo),
+                  now: int = Depends(get_now)):
+    return await reads.unfiled(repo, now=now, project_key=project)
 
 
 @router.get("/api/epics/{key}")

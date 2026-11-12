@@ -79,9 +79,18 @@ def _human(w) -> bool:
     return bool(w) and w.startswith("human:")
 
 
-async def needs_you(repo, *, now) -> list[dict]:
+async def _project_id(repo, project_key):
+    """None when no filter; -1 for an unknown key so the filter matches nothing."""
+    if not project_key:
+        return None
+    p = await repo.first("select id from projects where key = ?", (project_key,))
+    return p["id"] if p else -1
+
+
+async def needs_you(repo, *, now, project_key=None) -> list[dict]:
+    pid = await _project_id(repo, project_key)
     rows = []
-    for row in await load_epics(repo):
+    for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
         d = derive_epic(e, items, now)
         if d.hidden or d.board_column in ("done", "canceled"):
@@ -104,6 +113,8 @@ async def needs_you(repo, *, now) -> list[dict]:
                          "waiting_on": e["waiting_on"], "waiting_since": _waiting_since(e, items),
                          "reasons": reasons})
     for i in await repo.query("select * from items where filing = 'standalone'"):
+        if pid is not None and i["project_id"] != pid:
+            continue
         if effective_category(i) in OPEN_CATEGORIES and _human(i["waiting_on"]):
             rows.append({"kind": "item", "id": i["id"], "ref": item_ref(i), "title": i["title"],
                          "url": i["url"], "waiting_on": i["waiting_on"],
@@ -111,7 +122,8 @@ async def needs_you(repo, *, now) -> list[dict]:
     return sorted(rows, key=lambda r: (r["waiting_since"], r["kind"], r["id"]))
 
 
-async def stalled(repo, *, now, waiting_on=None) -> list[dict]:
+async def stalled(repo, *, now, waiting_on=None, project_key=None) -> list[dict]:
+    pid = await _project_id(repo, project_key)
     th = await thresholds(repo)
     rows = []
 
@@ -123,23 +135,32 @@ async def stalled(repo, *, now, waiting_on=None) -> list[dict]:
                      "waiting_group": g, "waiting_since": since,
                      "stalled_for_hours": round((now - since) / 3600, 1), **extra})
 
-    for row in await load_epics(repo):
+    for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
         d = derive_epic(e, items, now)
         if epic_stalled(e, items, d, now, th):
             add("epic", e["id"], e["key"], e["title"], e["waiting_on"], _waiting_since(e, items), {})
     for i in await repo.query(ITEMS_FOR_STALL):
+        if pid is not None and (i["project_id"] or i["epic_project_id"]) != pid:
+            continue
         if stall_eligible(i) and item_stalled(i, now, th):
             add("item", i["id"], item_ref(i), i["title"], i["waiting_on"], i["last_activity_at"],
                 {"url": i["url"], "source": i["source"], "external_id": i["external_id"]})
     return sorted(rows, key=lambda r: (r["waiting_since"], r["kind"], r["id"]))
 
 
-async def unfiled(repo, *, now) -> list[dict]:
-    rows = await repo.query(
-        "select id, source, external_id, title, url, owner, waiting_on, last_activity_at from items "
-        "where filing = 'unfiled' and status_category != 'canceled' order by last_activity_at, id")
-    return rows
+async def unfiled(repo, *, now, project_key=None) -> list[dict]:
+    sql = ("select i.id, i.source, i.external_id, i.title, i.url, i.owner, i.waiting_on, "
+           "i.last_activity_at, p.key as project_key, i.status_category, i.merged_at, i.live_at "
+           "from items i left join projects p on p.id = i.project_id "
+           "where i.filing = 'unfiled' and i.status_category != 'canceled'")
+    args: tuple = ()
+    if project_key:
+        sql += " and p.key = ?"
+        args = (project_key,)
+    rows = await repo.query(sql + " order by i.last_activity_at, i.id", args)
+    # `category` folds a merged-and-live review item into done, as everywhere else.
+    return [{**r, "category": effective_category(r)} for r in rows]
 
 
 async def projects(repo) -> list[dict]:

@@ -23,12 +23,13 @@ async def mk_epic(repo, key="DEMO-E1", project="DEMO", title="E", manual="todo",
 
 
 async def mk_item(repo, ext, epic_id=None, cat="in_progress", filing=None, waiting_on="agent:a", last=NOW,
-                  merged=None, live=None, source="kanban", title="t", reason=None):
+                  merged=None, live=None, source="kanban", title="t", reason=None, project_id=None):
     filing = filing or ("epic" if epic_id else "unfiled")
     return await repo.execute(
-        "insert into items(source,external_id,epic_id,filing,title,status_category,waiting_on,blocked_reason,"
-        "last_activity_at,merged_at,live_at,created_at,updated_at) values(?,?,?,?,?,?,?,?,?,?,?,1,1)",
-        (source, ext, epic_id, filing, title, cat, waiting_on, reason, last, merged, live))
+        "insert into items(source,external_id,epic_id,project_id,filing,title,status_category,waiting_on,"
+        "blocked_reason,last_activity_at,merged_at,live_at,created_at,updated_at)"
+        " values(?,?,?,?,?,?,?,?,?,?,?,?,1,1)",
+        (source, ext, epic_id, project_id, filing, title, cat, waiting_on, reason, last, merged, live))
 
 
 def col(b, name):
@@ -172,7 +173,8 @@ async def test_unfiled_lists_only_unfiled_oldest_first(repo):
     rows = await reads.unfiled(repo, now=NOW)
     assert [r["id"] for r in rows] == [a, b]
     assert set(rows[0]) == {"id", "source", "external_id", "title", "url", "owner", "waiting_on",
-                            "last_activity_at"}
+                            "last_activity_at", "project_key", "status_category", "category",
+                            "merged_at", "live_at"}
 
 
 async def test_epic_detail_groups_tasks_into_five_groups(repo):
@@ -264,3 +266,63 @@ async def test_stalled_skips_items_of_canceled_epic(repo):
     await mk_item(repo, "1", e, "in_progress", last=NOW - 100 * H)
     await mk_item(repo, "2", None, "in_progress", filing="standalone", last=NOW - 100 * H)
     assert [r["ref"] for r in await reads.stalled(repo, now=NOW)] == ["kanban:2"]
+
+
+async def _pid(repo, key):
+    return (await repo.first("select id from projects where key=?", (key,)))["id"]
+
+
+async def test_unfiled_carries_project_and_effective_category(repo):
+    await mk_epic(repo)
+    pid = await _pid(repo, "DEMO")
+    a = await mk_item(repo, "a", None, "review", merged=1, live=2, last=10, project_id=pid)
+    b = await mk_item(repo, "b", None, "done", waiting_on=None, last=20)
+    rows = {r["id"]: r for r in await reads.unfiled(repo, now=NOW)}
+    assert rows[a]["project_key"] == "DEMO" and rows[a]["category"] == "done"
+    assert rows[a]["status_category"] == "review" and rows[a]["live_at"] == 2
+    assert rows[b]["project_key"] is None and rows[b]["category"] == "done"
+
+
+async def test_unfiled_project_filter(repo):
+    await mk_epic(repo)
+    await mk_epic(repo, key="OTHER-E1", project="OTHER")
+    a = await mk_item(repo, "a", None, "todo", project_id=await _pid(repo, "DEMO"))
+    await mk_item(repo, "b", None, "todo", project_id=await _pid(repo, "OTHER"))
+    await mk_item(repo, "c", None, "todo")
+    assert [r["id"] for r in await reads.unfiled(repo, now=NOW, project_key="DEMO")] == [a]
+
+
+async def test_needs_you_project_filter(repo):
+    await mk_epic(repo, waiting_on="human:owner")
+    await mk_epic(repo, key="OTHER-E1", project="OTHER", waiting_on="human:owner")
+    i = await mk_item(repo, "9", None, "review", filing="standalone", waiting_on="human:owner",
+                      project_id=await _pid(repo, "OTHER"))
+    await mk_item(repo, "8", None, "review", filing="standalone", waiting_on="human:owner",
+                  project_id=await _pid(repo, "DEMO"))
+    rows = await reads.needs_you(repo, now=NOW, project_key="OTHER")
+    assert sorted((r["kind"], r["ref"]) for r in rows) == [("epic", "OTHER-E1"), ("item", "kanban:9")]
+    assert any(r["id"] == i for r in rows)
+
+
+async def test_stalled_project_filter_uses_item_or_epic_project(repo):
+    await repo.execute("insert into sources(name, stall_hours, updated_at) values('kanban', 1, 1)")
+    d = await mk_epic(repo, last=NOW - 9 * H)
+    o = await mk_epic(repo, key="OTHER-E1", project="OTHER", last=NOW - 9 * H)
+    await mk_item(repo, "1", d, "in_progress", last=NOW - 5 * H)
+    await mk_item(repo, "2", o, "in_progress", last=NOW - 5 * H)
+    await mk_item(repo, "3", None, "todo", filing="standalone", last=NOW - 5 * H,
+                  project_id=await _pid(repo, "OTHER"))
+    rows = await reads.stalled(repo, now=NOW, project_key="OTHER")
+    assert {r["ref"] for r in rows} == {"OTHER-E1", "kanban:2", "kanban:3"}
+
+
+async def test_list_routes_accept_project_param(make_app, client_for):
+    app, repo = make_app(clock=lambda: NOW)
+    t = await add_token(repo, scopes="read")
+    await mk_epic(repo, waiting_on="human:owner")
+    async with client_for(app) as c:
+        for p in ("needs-you", "stalled", "unfiled"):
+            r = await c.get(f"/api/{p}?project=NOPE", headers=bearer(t))
+            assert r.status_code == 200 and r.json() == []
+        r = await c.get("/api/needs-you?project=DEMO", headers=bearer(t))
+        assert [x["ref"] for x in r.json()] == ["DEMO-E1"]

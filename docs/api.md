@@ -51,17 +51,21 @@ than 7 days are hidden.
 
 ### GET /api/needs-you
 
-Open epics and standalone items waiting on a human, plus epics awaiting approval or
-confirmation or merged but not live. Oldest first. 200.
+Query: `project` (key). Open epics and standalone items waiting on a human, plus epics awaiting
+approval or confirmation or merged but not live. Oldest first. With `project`, only epics and
+standalone items of that project. 200.
 
 ### GET /api/stalled
 
-Query: `waiting_on` (`agent|human|source`). Stalled epics and items (filed to an epic or
-standalone). 200.
+Query: `waiting_on` (`agent|human|source`), `project` (key; an item counts for its own project or
+its epic's). Stalled epics and items (filed to an epic or standalone). 200.
 
 ### GET /api/unfiled
 
-Non-canceled items that are not yet filed. 200.
+Query: `project` (key). Non-canceled items that are not yet filed, oldest first. A row has
+`id, source, external_id, title, url, owner, waiting_on, last_activity_at, project_key` (null when
+the item names no project), `status_category`, `category` (the effective category: a merged and
+live review item counts as `done`), `merged_at, live_at`. 200.
 
 ### GET /api/epics/{key}
 
