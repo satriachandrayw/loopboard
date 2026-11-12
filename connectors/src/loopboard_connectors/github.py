@@ -92,14 +92,47 @@ def collect(fetch_json: Callable[[str], Any], *, repos: dict[str, str], human, a
                     continue
                 checks = reviews = []
                 if pr.get("state") == "open" and not pr.get("draft"):
-                    checks = fetch_json(f"{API}/repos/{repo}/commits/{pr['head']['sha']}/check-runs?per_page=100")
-                    reviews = fetch_json(f"{API}/repos/{repo}/pulls/{pr['number']}/reviews?per_page=100")
+                    checks = _fetch_check_runs(
+                        fetch_json, f"{API}/repos/{repo}/commits/{pr['head']['sha']}/check-runs?per_page=100")
+                    reviews = _fetch_reviews(
+                        fetch_json, f"{API}/repos/{repo}/pulls/{pr['number']}/reviews?per_page=100")
                 pr = dict(pr, _repo=repo)
                 items.append(map_pr(pr, checks=checks, reviews=reviews, project_key=project, human=human,
                                     agent_logins=agent_logins, live_branches=live_branches.get(repo, [])))
             except (KeyError, TypeError, ValueError, AttributeError):
                 raise SourceError("unexpected GitHub response") from None
     return items
+
+
+MAX_PAGES = 20
+PER_PAGE = 100
+
+
+def _fetch_check_runs(fetch_json, url: str) -> dict:
+    runs: list = []
+    total = None
+    for page in range(1, MAX_PAGES + 1):
+        data = fetch_json(url if page == 1 else f"{url}&page={page}")
+        if not isinstance(data, dict):
+            raise SourceError("unexpected GitHub response")
+        batch = data.get("check_runs") or []
+        total = data.get("total_count", len(batch)) if total is None else total
+        runs += batch
+        if not batch or len(runs) >= total:
+            return {"total_count": total, "check_runs": runs}
+    raise SourceError("too many check runs to fetch")
+
+
+def _fetch_reviews(fetch_json, url: str) -> list:
+    reviews: list = []
+    for page in range(1, MAX_PAGES + 1):
+        batch = fetch_json(url if page == 1 else f"{url}&page={page}")
+        if not isinstance(batch, list):
+            raise SourceError("unexpected GitHub response")
+        reviews += batch
+        if len(batch) < PER_PAGE:
+            return reviews
+    raise SourceError("too many reviews to fetch")
 
 
 class _SameHostRedirects(urllib.request.HTTPRedirectHandler):

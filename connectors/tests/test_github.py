@@ -268,3 +268,73 @@ def test_github_allows_localhost_http(tmp_path, capsys):
     code = cli.main(["sync", "github", "--config", str(p)],
                     env={"LB_TOKEN": TOKEN, "GH_TOKEN": GH_TOKEN}, post=post, fetch_json=fake_fetch)
     assert code == 0
+
+
+def _green(i):
+    return {"id": i, "status": "completed", "conclusion": "success"}
+
+
+def test_check_runs_follow_pagination():
+    seen = []
+
+    def f(url):
+        if "/check-runs" in url:
+            seen.append(url)
+            if "page=2" in url:
+                runs = [_green(i) for i in range(100, 149)] + [
+                    {"id": 999, "status": "completed", "conclusion": "failure"}]
+            else:
+                runs = [_green(i) for i in range(100)]
+            return {"total_count": 150, "check_runs": runs}
+        return fake_fetch(url)
+
+    def all_green(url):
+        if "/check-runs" in url:
+            return {"total_count": 100, "check_runs": [_green(i) for i in range(100)]}
+        return fake_fetch(url)
+    items = collect(f)
+    base = collect(all_green)
+    assert any("page=2" in u for u in seen)
+    assert not any("page=3" in u for u in seen)
+    assert any(items[k].waiting_on != base[k].waiting_on for k in items)
+
+
+def test_check_runs_pagination_stops_on_empty_page():
+    calls = []
+
+    def f(url):
+        if "/check-runs" in url:
+            calls.append(url)
+            return {"total_count": 150, "check_runs": [_green(i) for i in range(100)] if "&page=" not in url else []}
+        return fake_fetch(url)
+    collect(f)
+    assert len(calls) == 10  # 5 open PRs x (page 1, empty page 2)
+
+
+def test_reviews_follow_pagination():
+    seen = []
+    page1 = [{"user": {"login": f"u{i}"}, "state": "APPROVED", "submitted_at": "2025-01-01T00:00:00Z"}
+             for i in range(100)]
+    page2 = [{"user": {"login": "late"}, "state": "CHANGES_REQUESTED", "submitted_at": "2025-01-02T00:00:00Z"}]
+
+    def f(url):
+        if "/reviews" in url:
+            seen.append(url)
+            return page2 if "page=2" in url else page1
+        if "/check-runs" in url:
+            return {"total_count": 0, "check_runs": []}
+        return fake_fetch(url)
+    items = collect(f)
+    base = collect(lambda u: [] if "/reviews" in u else (
+        {"total_count": 0, "check_runs": []} if "/check-runs" in u else fake_fetch(u)))
+    assert any("page=2" in u for u in seen)
+    assert any(items[k].waiting_on != base[k].waiting_on for k in items)
+
+
+def test_unbounded_pagination_is_a_source_error():
+    def f(url):
+        if "/check-runs" in url:
+            return {"total_count": 10**9, "check_runs": [_green(1)] * 100}
+        return fake_fetch(url)
+    with pytest.raises(SourceError):
+        collect(f)
