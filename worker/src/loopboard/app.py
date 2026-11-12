@@ -20,6 +20,9 @@ def build_app(*, db=None, clock=None, access=None, jwks=None, verify_sig=None, f
     async def health(p: Principal = require("read")):
         return {"ok": True, "principal": p.name}
 
+    from loopboard.routes import ingest as ingest_routes
+
+    app.include_router(ingest_routes.router)
     return app
 
 
