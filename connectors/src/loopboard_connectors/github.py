@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from .client import USER_AGENT
 from .contract import Item, SourceError
 
 API = "https://api.github.com"
@@ -151,7 +152,7 @@ def default_fetch_json(token: str, *, allowed_prefix: str = API + "/") -> Callab
     def fetch(url: str) -> Any:
         req = urllib.request.Request(url, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "loopboard-connector"})
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": USER_AGENT})
         try:
             with opener.open(req, timeout=30) as resp:
                 if resp.status != 200:

@@ -4,10 +4,13 @@ import json
 import urllib.error
 import urllib.request
 
+from . import __version__
 from .contract import IngestRejected, SourceError
 
 CHUNK = 100
 COUNTS = ("accepted", "created", "updated", "skipped_older")
+# A real User-Agent: Cloudflare's Browser Integrity Check rejects the default Python-urllib one (error 1010).
+USER_AGENT = f"loopboard-connectors/{__version__} (+https://github.com/satriachandrayw/loopboard)"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -39,7 +42,8 @@ class IngestClient:
     def send(self, source: str, items) -> dict:
         totals = {k: 0 for k in COUNTS}
         items = list(items)
-        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json",
+                   "User-Agent": USER_AGENT}
         for i in range(0, len(items), CHUNK):
             body = json.dumps({"source": source, "items": [it.to_payload() for it in items[i:i + CHUNK]]}).encode()
             res = self._post(self.url, body, headers)

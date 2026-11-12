@@ -53,6 +53,9 @@ def test_happy_path(tmp_path, capsys):
     assert payload["source"] == "kanban"
     assert headers["Authorization"] == f"Bearer {TOKEN}"
     assert headers["Content-Type"] == "application/json"
+    # Cloudflare Browser Integrity Check blocks the default Python-urllib UA with error 1010.
+    assert headers["User-Agent"].startswith("loopboard-connectors/")
+    assert "urllib" not in headers["User-Agent"].lower()
 
 
 def test_nonzero_exit_posts_nothing(tmp_path, capsys):
