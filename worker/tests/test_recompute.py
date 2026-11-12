@@ -49,3 +49,9 @@ async def test_done_at_set_on_entering_done_and_cleared_on_leaving(repo):
     await repo.execute("update items set status_category='in_progress', live_at=null, merged_at=null")
     assert await recompute_epic(repo, 1, actor="a", via="api", now=NOW + 5) == "in_progress"
     assert (await repo.first("select done_at from epics where id=1"))["done_at"] is None
+
+
+async def test_only_epic_filed_items_feed_derivation(repo):
+    await seed(repo, "review", board="todo")
+    await repo.execute("update items set filing='standalone'")
+    assert await recompute_epic(repo, 1, actor="a", via="api", now=NOW) == "todo"

@@ -179,3 +179,13 @@ async def test_event_payload_has_changed_fields_only(make_app, client_for):
     ev = (await events(repo))[-1]
     assert ev["kind"] == "item.updated"
     assert set(json.loads(ev["payload"])) == {"title"}
+
+
+async def test_project_key_does_not_move_epic_filed_item_out_of_epic_project(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo)
+    await repo.execute("insert into projects(key,name,created_at) values ('OTHER','o',1)")
+    await post(client_for, app, t, [item(epic_key="DEMO-E1")])
+    before = (await row(repo))["project_id"]
+    await post(client_for, app, t, [item(last_activity_at=T2, project_key="OTHER")])
+    assert (await row(repo))["project_id"] == before

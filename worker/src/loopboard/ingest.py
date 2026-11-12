@@ -39,7 +39,8 @@ async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, vi
         for k in ("merged_at", "live_at"):
             if getattr(it, k) is not None:
                 new[k] = parse_ts(getattr(it, k))
-        if it.project_key:
+        keeps_epic_project = stored is not None and stored["filing"] == "epic" and not it.epic_key
+        if it.project_key and not keeps_epic_project:
             new["project_id"] = projects[it.project_key]
         if it.epic_key:
             e = epics[it.epic_key]

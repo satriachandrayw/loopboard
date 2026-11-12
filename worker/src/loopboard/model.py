@@ -73,3 +73,79 @@ class IngestIn(BaseModel):
 
     source: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,31}$")
     items: list[ItemIn] = Field(max_length=100)
+
+
+# --- write API models ---
+_WAITING = r"^(agent|human|source):[A-Za-z0-9._-]{1,64}$"
+
+
+class ProjectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(pattern=r"^[A-Z][A-Z0-9]{1,9}$")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class EpicIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+    goal: str | None = Field(default=None, max_length=2000)
+    stage: Literal[STAGES] = "idea"  # type: ignore[valid-type]
+    owner: str | None = Field(default=None, max_length=100)
+    next_step: str | None = Field(default=None, max_length=200)
+    waiting_on: str | None = Field(default=None, pattern=_WAITING)
+    home_url: str | None = Field(default=None, max_length=500)
+    spec_url: str | None = Field(default=None, max_length=500)
+    plan_url: str | None = Field(default=None, max_length=500)
+    manual_column: Literal[EPIC_MANUAL_COLUMNS] = "backlog"  # type: ignore[valid-type]
+
+
+class EpicPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    goal: str | None = Field(default=None, max_length=2000)
+    stage: Literal[STAGES] | None = None  # type: ignore[valid-type]
+    owner: str | None = Field(default=None, max_length=100)
+    next_step: str | None = Field(default=None, max_length=200)
+    waiting_on: str | None = Field(default=None, pattern=_WAITING)
+    home_url: str | None = Field(default=None, max_length=500)
+    spec_url: str | None = Field(default=None, max_length=500)
+    plan_url: str | None = Field(default=None, max_length=500)
+    manual_column: Literal[EPIC_MANUAL_COLUMNS] | None = None  # type: ignore[valid-type]
+
+
+class FilingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filing: Literal["epic", "standalone", "ignored"]
+    epic_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}-E[0-9]+$")
+    project_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}$")
+
+
+class DeployedIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    live_at: str
+
+    @field_validator("live_at")
+    @classmethod
+    def _ts(cls, v):
+        parse_ts(v)
+        return v
+
+
+class RelationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    from_type: Literal["epic", "item"]
+    from_id: int
+    to_type: Literal["epic", "item"]
+    to_id: int
+
+
+class SourceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stall_hours: float = Field(gt=0, le=8760)
