@@ -37,12 +37,16 @@ Set the Worker vars `ACCESS_TEAM_DOMAIN` (`<your-team>.cloudflareaccess.com`) an
 - Both set: a request carrying a valid `Cf-Access-Jwt-Assertion` (RS256, verified against the
   team certs, audience `ACCESS_AUD`) is accepted as that user with all scopes. A bare
   `Cf-Access-Authenticated-User-Email` header is ignored, because workers.dev accepts any header.
+- Access service-token JWTs carry no `email` claim and are rejected (401). Machines use
+  Loopboard bearer tokens instead.
 - Bearer tokens keep working either way, so connectors do not need Access.
 
 ## Connectors
 
-Copy `connectors/config.example.toml` to `connectors/config.toml` (git-ignored), set the
-Loopboard URL, tenant and repo mappings, and export the token named by `token_env`. Then run
+Create every project first (`POST /api/projects`, see [api.md](api.md)): ingest rejects an
+unknown `project_key` with 422, so a sync whose tenants or repos map to a missing project posts
+nothing. Then copy `connectors/config.example.toml` to `connectors/config.toml` (git-ignored), set
+the Loopboard URL, tenant and repo mappings, and export the token named by `token_env`. Then run
 `uv run loopboard sync kanban --config connectors/config.toml`. See
 [connectors.md](connectors.md) for the contract and mappings, and [api.md](api.md) for the API.
 
@@ -51,7 +55,9 @@ Loopboard URL, tenant and repo mappings, and export the token named by `token_en
 None of these steps is done by the v1a build. Each needs the owner's OK first.
 
 1. First deploy: create the D1 database, put its id in `worker/wrangler.jsonc`, apply the
-   migrations remotely, deploy the Worker.
+   migrations remotely, deploy the Worker. Free-plan CPU time and D1 queries per invocation are
+   unmeasured so far (ingest is bounded to about 10 D1 calls per 100-item request); check the
+   Worker's CPU time and D1 metrics after the first real syncs.
 2. DNS: point a custom hostname at the Worker, if one is wanted instead of workers.dev.
 3. Access application: create a Cloudflare Access application for the hostname, then set
    `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`.

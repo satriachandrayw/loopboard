@@ -67,6 +67,7 @@ setsid uv run --python 3.13 pywrangler dev --port "$PORT" --test-scheduled --per
 DEV_PID=$!
 code=000
 for _ in $(seq 1 120); do
+  if ! kill -0 "$DEV_PID" 2>/dev/null; then echo "     dev server exited"; break; fi
   code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $RW" "$BASE/api/health" || true)"
   [ "$code" = 200 ] && break
   sleep 1
@@ -111,19 +112,27 @@ else
 fi
 
 # R3: create epic DEMO-E1, file every unfiled item to it, compare board counts.
-r="$(api POST /api/projects/DEMO/epics '{"title":"Acceptance epic"}')"
+# Step 6 runs without set -e so any failure prints FAIL instead of exiting silently.
+set +e
+EXPECTED="$ROOT/connectors/tests/fixtures/kanban/expected-board.json"
+r="$(api POST /api/projects/DEMO/epics '{"title":"Acceptance epic","waiting_on":"human:owner"}')"
 [ "${r##*$'\n'}" = 201 ] || fail "6 create epic -> ${r##*$'\n'}"
 EPIC="$(printf '%s' "${r%$'\n'*}" | jget "d['key']" 2>/dev/null || echo "")"
 if [ "$EPIC" != "DEMO-E1" ]; then fail "6 epic key is '$EPIC', expected DEMO-E1"; fi
-IDS="$(api GET /api/unfiled | sed '$d' | jget "' '.join(str(i['id']) for i in d)")"
+IDS="$(api GET /api/unfiled | sed '$d' | jget "' '.join(str(i['id']) for i in d)")" \
+  || { fail "6 GET /api/unfiled"; IDS=""; }
+WANT_UNFILED="$(jget "d['unfiled']" <"$EXPECTED")"
+N_UNFILED="$(echo $IDS | wc -w)"
+[ "$N_UNFILED" = "$WANT_UNFILED" ] && ok "6 /api/unfiled count $N_UNFILED matches expected-board.json" \
+  || fail "6 /api/unfiled count $N_UNFILED, expected $WANT_UNFILED"
 for id in $IDS; do
   r="$(api POST "/api/items/$id/filing" "{\"filing\":\"epic\",\"epic_key\":\"DEMO-E1\"}")"
   [ "${r##*$'\n'}" = 200 ] || fail "6 file item $id -> ${r##*$'\n'}"
 done
-echo "     filed $(echo $IDS | wc -w) items to DEMO-E1"
+echo "     filed $N_UNFILED items to DEMO-E1"
 BOARD="$(api GET /api/board | sed '$d')"
 printf '%s' "$BOARD" >"$TMP/board.json"
-if python3 - "$TMP/board.json" "$ROOT/connectors/tests/fixtures/kanban/expected-board.json" <<'PY'
+if python3 - "$TMP/board.json" "$EXPECTED" <<'PY'
 import json, sys
 board = json.load(open(sys.argv[1]))
 want = json.load(open(sys.argv[2]))["board"]
@@ -132,6 +141,7 @@ print("     board counts:", got)
 sys.exit(0 if got == want else 1)
 PY
 then ok "6 /api/board column counts match expected-board.json"; else fail "6 /api/board column counts differ from expected-board.json"; fi
+set -e
 
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/board")"
 [ "$code" = 401 ] && ok "6 /api/board without token -> 401" || fail "6 /api/board without token -> $code"
