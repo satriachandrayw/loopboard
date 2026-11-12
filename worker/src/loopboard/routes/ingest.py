@@ -11,6 +11,8 @@ router = APIRouter()
 @router.post("/api/ingest")
 async def ingest(body: IngestIn, p: Principal = require("ingest"),
                  repo=Depends(get_repo), now: int = Depends(get_now)):
+    if p.kind == "token" and p.source is None:
+        raise HTTPException(403, "connector tokens must be bound to a source")
     if p.source is not None and p.source != body.source:
         raise HTTPException(403, "token is bound to another source")
     try:

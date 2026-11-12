@@ -13,7 +13,7 @@ explicit offset or `Z`; a naive timestamp is 422. Request bodies reject unknown 
   `Cf-Access-Jwt-Assertion` (RS256, audience `ACCESS_AUD`) is accepted with all scopes. The
   `Cf-Access-Authenticated-User-Email` header alone is never trusted.
 - Status codes for every route: `401` no or invalid credentials, `403` the credentials lack the
-  scope (or an ingest token bound to another source), `422` invalid body or parameters.
+  scope (or an ingest token bound to another source or to none), `422` invalid body or parameters.
 
 ## Ingest (scope `ingest`)
 
@@ -27,7 +27,7 @@ required on open items), `blocked_reason` (`needs_input|other`), `next_step`, `p
 `epic_key`, `merged_at`, `live_at`. Absent `epic_key` leaves the item's filing unchanged.
 
 Response 200: `{"accepted","created","updated","skipped_older"}`. Ingest is idempotent; a payload
-older than the stored `last_activity_at` is skipped. 403 if the token is bound to another source.
+older than the stored `last_activity_at` is skipped. 403 if the token is bound to another source or is an ingest token bound to no source.
 See [connectors.md](connectors.md).
 
 ## Reads (scope `read`)

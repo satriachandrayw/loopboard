@@ -17,6 +17,7 @@ def item(**over):
 
 async def setup(make_app, client_for, **tok):
     app, repo = make_app(clock=lambda: NOW)
+    tok.setdefault("source", "kanban")
     t = await add_token(repo, name="bot", scopes="ingest", **tok)
     return app, repo, t
 
@@ -218,7 +219,7 @@ async def test_100_item_ingest_uses_bounded_d1_calls(client_for):
     db.apply_migrations()
     repo = Repo(db)
     app = build_app(db=db, clock=lambda: NOW)
-    t = await add_token(repo, name="bot", scopes="ingest")
+    t = await add_token(repo, name="bot", scopes="ingest", source="kanban")
     await mk_epic(repo)
     await mk_epic(repo, "DEMO-E2")
     items = [item(external_id=f"i{n}", project_key="DEMO",
@@ -340,3 +341,11 @@ async def test_concurrent_create_retries_as_update(make_app, client_for):
     assert len(calls) == 2
     assert (await row(repo))["title"] == "Mine"
     assert [e["kind"] for e in await events(repo)] == ["item.updated"]
+
+
+async def test_unbound_ingest_token_is_403(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source=None)
+    r = await post(client_for, app, t, [item()])
+    assert r.status_code == 403
+    assert r.json()["detail"] == "connector tokens must be bound to a source"
+    assert await row(repo) is None
