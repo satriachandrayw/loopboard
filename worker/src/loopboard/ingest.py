@@ -14,6 +14,7 @@ PLAIN = ("title", "url", "status_category", "raw_status", "owner", "waiting_on",
          "blocked_reason", "next_step")
 STORED = PLAIN + ("last_activity_at", "merged_at", "live_at", "project_id", "epic_id", "filing")
 EVENT = "insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
+MAX_FUTURE_SECONDS = 3600
 ITEM_ID = "(select id from items where source = ? and external_id = ?)"
 
 
@@ -26,6 +27,12 @@ async def _by_key(repo, sql: str, keys) -> dict:
 
 
 async def ingest_items(repo, *, source: str, items: list[ItemIn], actor: str, via: str, now: int) -> dict:
+    # Reject far-future timestamps up front: nothing is written for the request.
+    for it in items:
+        for name in ("last_activity_at", "merged_at", "live_at"):
+            v = getattr(it, name)
+            if v is not None and parse_ts(v) > now + MAX_FUTURE_SECONDS:
+                raise ValidationError(f"{name} is more than 1 hour in the future (item {it.external_id})")
     # Resolve every referenced epic/project before any write.
     epic_keys = {it.epic_key for it in items if it.epic_key}
     project_keys = {it.project_key for it in items if it.project_key}

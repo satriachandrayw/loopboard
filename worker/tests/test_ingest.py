@@ -297,3 +297,20 @@ async def test_overlapping_update_never_regresses_and_writes_no_event(make_app, 
     got = await row(repo)
     assert got["title"] == "WINNER" and got["last_activity_at"] == newer
     assert len(await events(repo)) == n_events
+
+
+async def test_far_future_timestamps_reject_whole_request(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    ok = "2026-11-12T09:00:00Z"
+    from datetime import datetime, timezone
+
+    def iso(sec):
+        return datetime.fromtimestamp(sec, timezone.utc).isoformat()
+
+    for field in ("last_activity_at", "merged_at", "live_at"):
+        over = {"last_activity_at": ok, field: iso(NOW + 3601)}
+        r = await post(client_for, app, t, [item(external_id="good", last_activity_at=ok), item(external_id="bad", **over)])
+        assert r.status_code == 422, field
+        assert await row(repo, "good") is None and await row(repo, "bad") is None
+    edge = await post(client_for, app, t, [item(last_activity_at=iso(NOW + 3600))])
+    assert edge.status_code == 200

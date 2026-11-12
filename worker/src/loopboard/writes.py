@@ -136,6 +136,8 @@ async def set_filing(repo, *, item_id, body: FilingIn, actor, now):
 
 
 async def mark_deployed(repo, *, item_id, live_at: int, actor, now):
+    if live_at > now + 3600:
+        raise ValidationError("live_at is more than 1 hour in the future")
     item = await _one(repo, "select * from items where id = ?", (item_id,), f"item {item_id} not found")
     if item["merged_at"] is None:
         raise ValidationError("item has no merged PR")

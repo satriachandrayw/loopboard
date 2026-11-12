@@ -305,3 +305,11 @@ async def test_epic_urls_must_be_http_or_https(make_app, client_for):
             assert r.status_code == 422, (field, bad)
     ok = await mk_epic(client_for, app, h, home_url="https://a.example/x", spec_url="http://a.example/y")
     assert ok.status_code == 201
+
+
+async def test_deployed_rejects_far_future_live_at(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    i = await add_item(repo, "1", cat="done", merged=1)
+    r = await req(client_for, app, h, "POST", f"/api/items/{i}/deployed", {"live_at": "2027-11-12T09:00:00Z"})
+    assert r.status_code == 422
+    assert (await repo.first("select live_at from items where id=?", (i,)))["live_at"] is None
