@@ -38,7 +38,7 @@ export const PROJECTS = [
 const COLS = [['backlog', 'Backlog'], ['todo', 'Todo'], ['in_progress', 'In progress'], ['review', 'Review'], ['done', 'Done']]
 
 export const epicCard = (id: number, column: string, extra: Record<string, unknown> = {}) => ({
-  id, key: `DEMO-E${id}`, title: `Epic ${id}`, project_key: 'DEMO', column, stage: 'build',
+  id, key: `DEMO-E${id}`, title: `Epic ${id}`, goal: null, project_key: 'DEMO', column, stage: 'build',
   progress: { done: 0, total: 1 }, owner: null, waiting_on: 'agent:a', waiting_since: 1, stalled: false,
   flags: [], review_owner: null, ...extra,
 })

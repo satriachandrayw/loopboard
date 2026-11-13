@@ -39,8 +39,8 @@ export default function NewEpicForm({ projects, initialProject = '', initialTitl
     if (!title.trim()) return setError('A title is required.')
     if (!project) return setError('Choose a project.')
     if (!name.trim()) return setError('Say who it waits on.')
-    const body: Record<string, string> = { title: title.trim(), stage, waiting_on: `${kind}:${name.trim()}` }
-    if (goal.trim()) body.goal = goal.trim()
+    if (!goal.trim()) return setError('Add a description: what this epic is for.')
+    const body = { title: title.trim(), stage, waiting_on: `${kind}:${name.trim()}`, goal: goal.trim() }
     setBusy(true)
     setError(null)
     try {
@@ -88,7 +88,7 @@ export default function NewEpicForm({ projects, initialProject = '', initialTitl
             </div>
           </div>
           <label className="field">
-            <span>Goal</span>
+            <span>Description</span>
             <textarea rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
           </label>
           {error && <p className="error" role="alert">{error}</p>}

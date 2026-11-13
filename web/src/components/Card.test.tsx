@@ -5,7 +5,7 @@ import { formatAge } from '../format'
 import type { Card as CardT } from '../types'
 
 const base: CardT = {
-  id: 1, key: 'DEMO-E1', title: 'Epic', project_key: 'DEMO', column: 'todo',
+  id: 1, key: 'DEMO-E1', title: 'Epic', goal: null, project_key: 'DEMO', column: 'todo',
   stage: 'build', progress: { done: 2, total: 4 }, owner: null,
   waiting_on: 'agent:builder', waiting_since: 1000, stalled: false, flags: [], review_owner: null,
 }
@@ -75,4 +75,20 @@ it('test_format_age', () => {
   expect(formatAge(25 * 60)).toBe('25m')
   expect(formatAge(26 * 3600)).toBe('26h')
   expect(formatAge(48 * 3600)).toBe('2d')
+})
+
+it('test_card_shows_description_clamped', () => {
+  const { container } = show({ goal: 'Ship the thing. '.repeat(120) })
+  const d = container.querySelector('.desc')!
+  expect(d.textContent).toContain('Ship the thing.')
+  expect(d.className).toBe('desc')
+  // Under the title, before the progress bar.
+  expect(d.previousElementSibling!.className).toBe('ti')
+  expect(d.nextElementSibling!.className).toBe('pb')
+})
+
+it('test_card_without_goal_has_no_description', () => {
+  const { container } = show({ goal: null })
+  expect(container.querySelector('.desc')).toBeNull()
+  expect(container.textContent).not.toContain('null')
 })

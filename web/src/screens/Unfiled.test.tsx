@@ -96,8 +96,10 @@ it('test_new_epic_from_row_prefills_creates_then_files', async () => {
   const dialog = screen.getByRole('dialog', { name: 'New epic' })
   expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Open two')
   expect((within(dialog).getByLabelText('Project') as HTMLSelectElement).value).toBe('SAMPLE')
+  await userEvent.type(within(dialog).getByLabelText('Description'), 'Why')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
   await waitFor(() => expect(posts(f).map((p) => p.url)).toEqual(['/api/projects/SAMPLE/epics', '/api/items/2/filing']))
+  expect(posts(f)[0].body.goal).toBe('Why')
   expect(posts(f)[1].body).toEqual({ filing: 'epic', epic_key: 'SAMPLE-E2' })
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 })
@@ -168,4 +170,21 @@ it('test_no_typed_keys', async () => {
   render(<Unfiled />)
   await screen.findByText('Open one')
   expect(screen.queryAllByRole('textbox')).toHaveLength(0)
+})
+
+it('test_new_epic_from_row_without_description_files_nothing', async () => {
+  const f = stubApi(routes({
+    '/api/health': { ok: true, principal: 'owner' },
+    'POST /api/projects/SAMPLE/epics': { id: 9, key: 'SAMPLE-E2', title: 'Open two' },
+    'POST /api/items/2/filing': {},
+  }))
+  render(<Unfiled />)
+  await screen.findByText('Open two')
+  await userEvent.click(within(row('Open two')).getByRole('button', { name: 'File to epic ▾' }))
+  await userEvent.click(screen.getByRole('menuitem', { name: '+ New epic…' }))
+  const dialog = screen.getByRole('dialog', { name: 'New epic' })
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
+  expect(within(dialog).getByRole('alert').textContent).toBe('Add a description: what this epic is for.')
+  expect(posts(f)).toEqual([])
+  expect(screen.getByRole('dialog', { name: 'New epic' })).toBeTruthy()
 })

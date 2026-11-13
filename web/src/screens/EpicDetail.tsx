@@ -91,7 +91,7 @@ export default function EpicDetail({ epicKey }: { epicKey: string }) {
           <div className="body">
             <StageTrack stage={epic.stage} column={epic.column} />
             <div className="card facts">
-              {epic.goal && (<><div className="meta">Goal</div><p className="next goal">{epic.goal}</p></>)}
+              {epic.goal && (<><div className="meta">Description</div><p className="next goal">{epic.goal}</p></>)}
               <div className="meta">Next step</div>
               <p className="next">{epic.next_step ?? '-'}</p>
               <dl>

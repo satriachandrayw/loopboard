@@ -5,6 +5,7 @@ export interface Card {
   id: number
   key: string
   title: string
+  goal: string | null
   project_key: string
   column: string
   stage: string | null
@@ -107,7 +108,6 @@ export interface Relation {
 
 export interface EpicDetailResponse {
   epic: Card & {
-    goal: string | null
     next_step: string | null
     home_url?: string | null
     spec_url?: string | null

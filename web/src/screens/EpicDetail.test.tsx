@@ -77,6 +77,8 @@ it('test_goal_links_and_relations', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => json(d)))
   render(<EpicDetail epicKey="DEMO-E1" />)
   await waitFor(() => screen.getByText('Ship the thing'))
+  expect(screen.getByText('Ship the thing').previousElementSibling!.textContent).toBe('Description')
+  expect(screen.queryByText('Goal')).toBeNull()
   for (const [name, href] of [['Home', 'https://h.test'], ['Plan', 'https://p.test']]) {
     const a = screen.getByRole('link', { name })
     expect(a.getAttribute('href')).toBe(href)

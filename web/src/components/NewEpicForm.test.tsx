@@ -21,14 +21,14 @@ it('test_posts_the_right_body_and_reports_the_new_key', async () => {
     .toEqual(['idea', 'spec', 'plan', 'build', 'review', 'ship'])
   await userEvent.type(screen.getByLabelText('Title'), 'New thing')
   await userEvent.selectOptions(screen.getByLabelText('Stage'), 'spec')
-  await userEvent.type(screen.getByLabelText('Goal'), 'Make it work')
+  await userEvent.type(screen.getByLabelText('Description'), '  Make it work ')
   await userEvent.click(screen.getByRole('button', { name: 'Create' }))
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('SAMPLE-E3'))
   expect(posts(f)).toEqual([{ url: '/api/projects/SAMPLE/epics',
     body: { title: 'New thing', stage: 'spec', waiting_on: 'human:jo.doe', goal: 'Make it work' } }])
 })
 
-it('test_agent_waiting_on_and_goal_omitted_when_blank', async () => {
+it('test_agent_waiting_on', async () => {
   const f = stubApi({ '/api/health': { ok: true, principal: 'ci-token' }, 'POST /api/projects/DEMO/epics': created })
   render(<NewEpicForm projects={PROJECTS} initialProject="DEMO" onCreated={() => {}} onCancel={() => {}} />)
   await waitFor(() => expect((screen.getByLabelText('Waiting on name') as HTMLInputElement).value).toBe('owner'))
@@ -36,9 +36,22 @@ it('test_agent_waiting_on_and_goal_omitted_when_blank', async () => {
   await userEvent.selectOptions(screen.getByLabelText('Waiting on kind'), 'agent')
   await userEvent.clear(screen.getByLabelText('Waiting on name'))
   await userEvent.type(screen.getByLabelText('Waiting on name'), 'builder')
+  await userEvent.type(screen.getByLabelText('Description'), 'Why')
   await userEvent.click(screen.getByRole('button', { name: 'Create' }))
   await waitFor(() => expect(posts(f)).toHaveLength(1))
-  expect(posts(f)[0].body).toEqual({ title: 'T', stage: 'idea', waiting_on: 'agent:builder' })
+  expect(posts(f)[0].body).toEqual({ title: 'T', stage: 'idea', waiting_on: 'agent:builder', goal: 'Why' })
+})
+
+it('test_blank_description_is_refused', async () => {
+  const f = stubApi({ '/api/health': { ok: true, principal: 'owner' }, 'POST /api/projects/DEMO/epics': created })
+  const onCreated = vi.fn()
+  render(<NewEpicForm projects={PROJECTS} initialProject="DEMO" onCreated={onCreated} onCancel={() => {}} />)
+  await userEvent.type(screen.getByLabelText('Title'), 'T')
+  await userEvent.type(screen.getByLabelText('Description'), '   ')
+  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+  expect(screen.getByRole('alert').textContent).toBe('Add a description: what this epic is for.')
+  expect(posts(f)).toEqual([])
+  expect(onCreated).not.toHaveBeenCalled()
 })
 
 it('test_requires_title_and_project', async () => {

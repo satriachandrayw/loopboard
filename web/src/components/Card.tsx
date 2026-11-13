@@ -56,6 +56,7 @@ export default function Card({ card, nowSeconds, onMove }: Props) {
         <span className="proj">{card.project_key}</span>
       </div>
       <h3 className="ti"><a href={epicHref(card.key)}>{card.title}</a></h3>
+      {card.goal?.trim() && <p className="desc">{card.goal}</p>}
       {total > 0 && (
         <div className="pb" aria-hidden="true"><i style={{ width: `${Math.round((100 * done) / total)}%` }} /></div>
       )}
