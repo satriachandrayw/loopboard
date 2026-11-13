@@ -144,7 +144,6 @@ async def test_confirm_done_moves_task_less_epic_to_done(make_app, client_for):
     assert (e["board_column"], e["done_confirmed_at"]) == ("done", NOW)
 
 
-@pytest.mark.xfail(strict=True, reason="Task 4: filing moves the task")
 async def test_filing_moves_item_and_recomputes_both_epics(make_app, client_for):
     app, repo, h = await seeded(make_app, client_for)
     await mk_epic(client_for, app, h, title="E2", manual_column="todo")

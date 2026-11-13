@@ -351,6 +351,12 @@ async def task_detail(repo, *, key, now):
     return out
 
 
+async def task_card(repo, *, key, now):
+    """The task as the boards show it (task_view), or None."""
+    rows = await load_tasks(repo, keys=[key])
+    return _view(rows[0], now, await thresholds(repo)) if rows else None
+
+
 async def tasks_board(repo, *, project_key, now):
     """One project's tasks in swimlanes: its shown epics in board order, then No epic."""
     p = await repo.first("select id from projects where key = ?", (project_key,))

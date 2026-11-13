@@ -21,7 +21,11 @@ It writes nothing to the repo and keeps tokens in shell variables only.
 cd worker
 uv run python scripts/make_token.py --name reader --scopes read,write
 uv run python scripts/make_token.py --name kanban-sync --scopes ingest --source kanban
+uv run python scripts/make_token.py --name owner-cli --scopes read,write,human
 ```
+
+Add `human` to a person's own token: Loopboard then treats its writes as a human's (only a human
+confirms a task done). Agent tokens never carry it.
 
 The script prints `TOKEN=lb_...` once, then an `INSERT` statement holding only the token's
 sha256. Run the INSERT against D1 (for example

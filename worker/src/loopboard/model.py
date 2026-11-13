@@ -250,9 +250,9 @@ class DeployedIn(BaseModel):
 class RelationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    from_type: Literal["epic", "item"]
+    from_type: Literal["epic", "item", "task"]
     from_id: int
-    to_type: Literal["epic", "item"]
+    to_type: Literal["epic", "item", "task"]
     to_id: int
 
 

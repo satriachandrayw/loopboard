@@ -25,6 +25,11 @@ class Principal:
     scopes: frozenset[str]
     source: str | None = None
 
+    @property
+    def is_human(self) -> bool:
+        """Signed in through Cloudflare Access, or a token with the `human` scope; else an agent."""
+        return self.kind == "access" or "human" in self.scopes
+
 
 @dataclass(frozen=True)
 class AccessConfig:

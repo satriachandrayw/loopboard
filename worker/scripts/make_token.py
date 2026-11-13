@@ -20,8 +20,10 @@ def main():
     ap.add_argument("--source")
     a = ap.parse_args()
     scopes = [x.strip() for x in a.scopes.split(",")]
-    if not scopes or not set(scopes) <= {"ingest", "read", "write"}:
-        ap.error("scopes must be a comma list of ingest, read, write")
+    if not scopes or not set(scopes) <= {"ingest", "read", "write", "human"}:
+        ap.error("scopes must be a comma list of ingest, read, write, human")
+    if "human" in scopes and ("ingest" in scopes or not {"read", "write"} & set(scopes)):
+        ap.error("human goes with read and/or write, never with ingest")
     if "ingest" in scopes and not a.source:
         ap.error("ingest tokens must be bound to one source (--source)")
     if a.source and set(scopes) != {"ingest"}:
