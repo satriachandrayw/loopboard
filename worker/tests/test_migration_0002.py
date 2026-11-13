@@ -147,3 +147,21 @@ async def test_0002_board_changes_only_by_lifecycle_rules():
     assert cards["DEMO-E1"] == ("review", 0, 2, ("merged_not_live",))
     assert "DEMO-E2" not in cards
 
+
+async def test_0002_filed_item_without_project_aborts():
+    db, repo = await seeded_0001()
+    await repo.execute(
+        "insert into items(source,external_id,project_id,filing,title,status_category,waiting_on,"
+        "last_activity_at,created_at,updated_at) values('kanban','orphan',null,'standalone','t','todo','agent:a',1,1,1)")
+    with pytest.raises(Exception):
+        migrate(db)
+
+
+async def test_0002_done_item_without_waiting_on_gets_source():
+    db, repo = await seeded_0001()
+    iid = await repo.execute(
+        "insert into items(source,external_id,project_id,filing,title,status_category,waiting_on,"
+        "last_activity_at,created_at,updated_at) values('github','pr1',1,'standalone','t','done',null,1,1,1)")
+    migrate(db)
+    t = await repo.first("select waiting_on from tasks where origin_item_id = ?", (iid,))
+    assert t["waiting_on"] == "source:github"

@@ -657,3 +657,12 @@ async def test_ingest_merged_keys_d1_calls_bounded(client_for):
     assert counter.calls <= base + MERGE_DEPTH, (base, counter.calls)
     for n in range(1, 51):
         assert (await row(repo, f"m{n}"))["task_id"] == survivors[n]
+
+
+async def test_auto_task_from_item_without_waiting_on_waits_on_source(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo, "DEMO-E5")
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5", status_category="done", waiting_on=None)])
+    assert r.json()["auto_tasks"] == 1
+    task = await repo.first("select waiting_on from tasks where key='DEMO-1'")
+    assert task["waiting_on"] == "source:kanban"

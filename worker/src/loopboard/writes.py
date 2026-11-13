@@ -284,7 +284,7 @@ def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now, vi
          "values (?, ?, ?, ?, 'task', ?, ?, ?, 'todo', 'medium', ?, ?, ?, '[]', "
          "(select id from items where source = ? and external_id = ?), ?, ?, ?)",
          (project_id, epic_id, seq, key, summary, f"Created from {item_origin(item)}", AUTO_DONE_WHEN, owner,
-          item.get("waiting_on"), actor, item["source"], item["external_id"], now, now, now)),
+          item.get("waiting_on") or f"source:{item['source']}", actor, item["source"], item["external_id"], now, now, now)),
         ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
          "select ?, ?, ?, 'task', id, 'task.created', ? from tasks where key = ?",
          (now, actor, via, json.dumps(payload), key)),
