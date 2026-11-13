@@ -18,6 +18,10 @@ TASK_KEY = r"^[A-Z][A-Z0-9]{1,9}-[0-9]+$"
 EPIC_KEY = r"^[A-Z][A-Z0-9]{1,9}-E[0-9]+$"
 
 
+# How many merged_into hops a merged-away task key is followed to its survivor.
+MERGE_DEPTH = 5
+
+
 class ValidationError(ValueError):
     pass
 

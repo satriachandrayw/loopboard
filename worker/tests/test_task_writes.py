@@ -302,3 +302,33 @@ def test_make_token_accepts_human_scope_not_with_ingest():
     assert ok.returncode == 0 and "'read,write,human'" in ok.stdout
     for bad in (["--scopes", "ingest,human", "--source", "kanban"], ["--scopes", "human"]):
         assert _make_token(*bad).returncode != 0, bad
+
+
+async def test_merge_refs_cap(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    await mk_task(client_for, app, h, refs=[f"OPS-{n}" for n in range(5)])
+    await mk_task(client_for, app, h, refs=[f"OPS-{n}" for n in range(10, 15)])
+    r = await req(client_for, app, h, "POST", "/api/tasks/DEMO-1/merge", {"into": "DEMO-2"})
+    assert r.status_code == 422
+    assert "merged refs would exceed 10; trim the survivor's refs first" in r.text
+    assert (await task_row(repo, "DEMO-1"))["status"] == "todo"
+    await mk_task(client_for, app, h, refs=[f"OPS-{n}" for n in range(20, 24)])
+    r = await req(client_for, app, h, "POST", "/api/tasks/DEMO-3/merge", {"into": "DEMO-2"})
+    assert r.status_code == 200 and len(r.json()["refs"]) == 10
+
+
+async def test_link_to_merged_key_links_survivor(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    i = await add_item(repo, "1", cat="in_progress")
+    for _ in range(3):
+        await mk_task(client_for, app, h)
+    assert (await req(client_for, app, h, "POST", "/api/tasks/DEMO-2/merge", {"into": "DEMO-3"})).status_code == 200
+    assert (await req(client_for, app, h, "POST", "/api/tasks/DEMO-1/merge", {"into": "DEMO-2"})).status_code == 422
+    assert (await req(client_for, app, h, "POST", "/api/tasks/DEMO-3/merge", {"into": "DEMO-1"})).status_code == 200
+    # chain DEMO-2 -> DEMO-3 -> DEMO-1
+    r = await req(client_for, app, h, "POST", f"/api/items/{i}/link", {"task_key": "DEMO-2"})
+    assert r.status_code == 200 and r.json()["task_id"] == (await task_row(repo, "DEMO-1"))["id"]
+    await invariant(repo)
+    await req(client_for, app, h, "POST", "/api/tasks/DEMO-1/status", {"status": "canceled"})
+    r = await req(client_for, app, h, "POST", f"/api/items/{i}/link", {"task_key": "DEMO-2"})
+    assert r.status_code == 422

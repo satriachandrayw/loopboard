@@ -1,7 +1,7 @@
 """Write API logic (D1: state change + event in one batch)."""
 import json
 
-from .model import EpicIn, EpicPatch, FilingIn, RelationIn, TaskIn, TaskPatch, ValidationError
+from .model import MERGE_DEPTH, EpicIn, EpicPatch, FilingIn, RelationIn, TaskIn, TaskPatch, ValidationError
 from .recompute import recompute_epic, recompute_epics
 
 EVENT = ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
@@ -445,6 +445,8 @@ async def merge_tasks(repo, *, key, into, actor, now) -> dict:
     for r in [a["key"], *json.loads(a["refs"] or "[]")]:
         if r not in refs and r != b["key"]:
             refs.append(r)
+    if len(refs) > 10:
+        raise ValidationError("merged refs would exceed 10; trim the survivor's refs first")
     filing = "epic" if b["epic_id"] else "standalone"
     await repo.batch([
         ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
@@ -467,6 +469,10 @@ async def merge_tasks(repo, *, key, into, actor, now) -> dict:
 async def link_item(repo, *, item_id, task_key, actor, now) -> dict:
     item = await _item(repo, item_id)
     task = await _task(repo, task_key)
+    for _ in range(MERGE_DEPTH):  # a merged-away key links to its survivor, as in ingest
+        if task["status"] != "canceled" or not task["merged_into"]:
+            break
+        task = await _one(repo, "select * from tasks where id = ?", (task["merged_into"],), f"task {task_key} not found")
     if task["status"] == "canceled":
         raise ValidationError(f"task {task_key} is canceled")
     if item["task_id"] == task["id"]:

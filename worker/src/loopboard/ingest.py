@@ -13,7 +13,7 @@ never an error.
 import json
 import re
 
-from .model import ItemIn, ValidationError, parse_ts
+from .model import MERGE_DEPTH, ItemIn, ValidationError, parse_ts
 from .recompute import _qs, chunks, recompute_epics
 from .writes import auto_task_stmts
 
@@ -35,7 +35,6 @@ async def _by_key(repo, sql: str, keys) -> dict:
 
 RACES = ("UNIQUE constraint failed: items.source, items.external_id",
          "UNIQUE constraint failed: tasks.project_id, tasks.seq", "UNIQUE constraint failed: tasks.key")
-MERGE_DEPTH = 5
 
 
 def _lost_create_race(e: Exception) -> bool:

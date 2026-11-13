@@ -228,13 +228,15 @@ confirmation.
 Body: `{"into": "<KEY>"}`. Moves the task's links to `into`, adds the key (and its refs) to the
 survivor's `refs` and cancels the task with `merged_into`. Items titled with the old key keep
 linking to the survivor. Returns the survivor. 200, 404 unknown task, 422 across projects, into
-itself, or from or into a canceled task.
+itself, from or into a canceled task, or when the survivor's refs would exceed 10 (`merged refs
+would exceed 10; trim the survivor's refs first`).
 
 ### POST /api/items/{item_id}/link
 
 Body: `{"task_key": "<KEY>"}`. Links the item to the task; the item takes the task's project and
-epic (`filing` `epic`, or `standalone` for a task with no epic). Returns the item row. 200, 404
-unknown item or task, 422 canceled task.
+epic (`filing` `epic`, or `standalone` for a task with no epic). A merged-away key links to the
+task it was merged into, as ingest does. Returns the item row. 200, 404 unknown item or task, 422
+canceled task.
 
 ### POST /api/items/{item_id}/unlink
 
