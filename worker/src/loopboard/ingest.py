@@ -45,18 +45,28 @@ def _lost_create_race(e: Exception) -> bool:
 
 
 def _ref_pattern(ref: str):
-    return re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(ref)}(?![A-Za-z0-9_])")
+    return re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(ref)}(?![A-Za-z0-9_-])")
 
 
 async def _tasks_by_key(repo, keys) -> dict:
-    """Open tasks by key; a merged-away key maps to its survivor (followed a few hops)."""
+    """Open tasks by key; a merged-away key maps to its survivor. Merges are followed for the whole
+    set at once: one chunked `id in (...)` select per hop, at most MERGE_DEPTH hops."""
     cols = "select id, key, project_id, epic_id, status, merged_into from tasks"
     found = await _by_key(repo, cols + " where key in ({})", keys)
+    by_id = {t["id"]: t for t in found.values()}
+    merged = lambda t: t["status"] == "canceled" and t["merged_into"]  # noqa: E731
+    for _ in range(MERGE_DEPTH):
+        want = {t["merged_into"] for t in list(by_id.values()) if merged(t)} - by_id.keys()
+        if not want:
+            break
+        for part in chunks(sorted(want)):
+            for r in await repo.query(cols + f" where id in ({_qs(len(part))})", part):
+                by_id[r["id"]] = r
     out = {}
     for k, t in found.items():
         hops = 0
-        while t is not None and t["status"] == "canceled" and t["merged_into"] and hops < MERGE_DEPTH:
-            t = await repo.first(cols + " where id = ?", (t["merged_into"],))
+        while t is not None and merged(t) and hops < MERGE_DEPTH:
+            t = by_id.get(t["merged_into"])
             hops += 1
         if t is not None and t["status"] != "canceled":
             out[k] = t

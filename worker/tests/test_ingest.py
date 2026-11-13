@@ -523,12 +523,13 @@ async def test_ref_matches_whole_token_in_same_project_only(make_app, client_for
     r = await post(client_for, app, t, [
         item(external_id="a", title="fix(OPS-8001): retry", project_key="DEMO"),
         item(external_id="b", title="OPS-80011 and XOPS-80 are not refs", project_key="DEMO"),
+        item(external_id="f", title="OPS-80-retry is not a ref either", project_key="DEMO"),
         item(external_id="c", title="OPS-9 is SAMPLE's ref", project_key="DEMO"),
         item(external_id="d", title="OPS-77 belongs to a canceled task", project_key="DEMO"),
         item(external_id="e", title="OPS-8001 without a project")])
     assert r.json()["linked_task"] == 1
     assert (await row(repo, "a"))["task_id"] == hit and (await row(repo, "a"))["filing"] == "standalone"
-    for x in "bcde":
+    for x in "bcdef":
         assert (await row(repo, x))["filing"] == "unfiled", x
 
 
@@ -627,3 +628,32 @@ async def test_ingest_d1_calls_bounded(client_for):
     counter.calls = 0
     await post(client_for, app, t, [dict(x, title="new", last_activity_at=T2) for x in items])
     assert counter.calls <= 8 + 3, counter.calls
+
+
+async def test_ingest_merged_keys_d1_calls_bounded(client_for):
+    """50 items tagged with 50 merged-away keys (chains of 2) cost at most MERGE_DEPTH more D1 calls
+    than 50 items tagged with live keys, and each links to its survivor."""
+    from loopboard.app import build_app
+    from loopboard.db import Repo
+    from loopboard.ingest import MERGE_DEPTH
+    from tests.fakes.d1 import FakeD1
+
+    db = FakeD1()
+    db.apply_migrations()
+    repo = Repo(db)
+    app = build_app(db=db, clock=lambda: NOW)
+    t = await add_token(repo, name="bot", scopes="ingest", source="kanban")
+    survivors = {}
+    for n in range(1, 51):
+        survivors[n] = await mk_task(repo, key=f"DEMO-{n}")
+        mid = await mk_task(repo, key=f"DEMO-{50 + n}", status="canceled", merged_into=survivors[n])
+        await mk_task(repo, key=f"DEMO-{100 + n}", status="canceled", merged_into=mid)
+    counter = CountingD1(db)
+    r = await post(client_for, app, t, [item(external_id=f"live{n}", task_key=f"DEMO-{n}") for n in range(1, 51)])
+    assert r.json()["linked_task"] == 50
+    base, counter.calls = counter.calls, 0
+    r = await post(client_for, app, t, [item(external_id=f"m{n}", task_key=f"DEMO-{100 + n}") for n in range(1, 51)])
+    assert r.json()["linked_task"] == 50
+    assert counter.calls <= base + MERGE_DEPTH, (base, counter.calls)
+    for n in range(1, 51):
+        assert (await row(repo, f"m{n}"))["task_id"] == survivors[n]
