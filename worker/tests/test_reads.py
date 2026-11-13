@@ -186,6 +186,15 @@ async def test_needs_you_lists_tasks_waiting_on_human(repo):
     assert next(r for r in rows if r["kind"] == "task")["epic_key"] == "DEMO-E1"
 
 
+async def test_needs_you_hides_tasks_of_canceled_epics(repo):
+    e = await mk_epic(repo, manual="canceled", board="canceled", waiting_on="agent:a")
+    await mk_task(repo, epic_id=e, summary="left behind", waiting_on="human:owner")
+    live = await mk_epic(repo, "DEMO-E2", waiting_on="agent:a")
+    t = await mk_task(repo, epic_id=live, summary="still open", waiting_on="human:owner")
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [r["id"] for r in rows if r["kind"] == "task"] == [t]
+
+
 async def _stall_setup(repo):
     await repo.execute("insert into sources(name, stall_hours, updated_at) values('kanban', 1, 1)")
     e = await mk_epic(repo, waiting_on="human:owner", last=NOW - 9 * H)
