@@ -80,16 +80,6 @@ export interface Project {
   created_at: number
 }
 
-export interface Task {
-  id: number
-  ref: string
-  title: string
-  url: string | null
-  waiting_on: string | null
-  category: string
-  source?: string
-}
-
 export interface EpicEvent {
   id: number
   at: number
@@ -102,9 +92,9 @@ export interface EpicEvent {
 export interface Relation {
   id: number
   kind: 'blocks'
-  from_type: 'epic' | 'item'
+  from_type: 'epic' | 'task' | 'item'
   from_id: number
-  to_type: 'epic' | 'item'
+  to_type: 'epic' | 'task' | 'item'
   to_id: number
 }
 
@@ -115,7 +105,7 @@ export interface EpicDetailResponse {
     spec_url?: string | null
     plan_url?: string | null
   }
-  tasks: Record<string, Task[]>
+  tasks: TaskView[]
   relations?: Relation[]
   events: EpicEvent[]
 }

@@ -59,3 +59,30 @@ it('test_stalled_pill_names_who_and_age', async () => {
   expect(screen.getByText('builder · 26h').classList.contains('agent')).toBe(true)
   expect(screen.getByText('you · 2d').classList.contains('you')).toBe(true)
 })
+
+it('test_needs_you_task_row_links_to_task', async () => {
+  stubApi({ '/api/needs-you': [
+    { kind: 'task', id: 3, ref: 'DEMO-3', title: 'Sign off', epic_key: 'DEMO-E1', waiting_on: 'human:owner', waiting_since: 1, reasons: ['awaiting your confirmation'] },
+  ] })
+  render(<NeedsYou />)
+  await screen.findByText('Sign off')
+  const a = screen.getByText('Sign off').closest('a')!
+  expect(a.getAttribute('href')).toBe('#/task/DEMO-3')
+  expect(a.getAttribute('target')).toBeNull()
+  const row = screen.getByText('Sign off').closest('li')!
+  expect(row.querySelector('.src')!.textContent).toBe('task')
+  expect(row.textContent).toContain('DEMO-3 · DEMO-E1')
+  expect(screen.getByRole('link', { name: 'Open task' }).getAttribute('href')).toBe('#/task/DEMO-3')
+})
+
+it('test_stalled_task_row_links_to_task', async () => {
+  stubApi({ '/api/stalled': [
+    { kind: 'task', id: 3, ref: 'DEMO-3', title: 'Plan step', epic_key: null, waiting_on: 'agent:coder', waiting_group: 'agent', waiting_since: 1, stalled_for_hours: 30 },
+  ] })
+  render(<Stalled />)
+  await screen.findByText('Plan step')
+  expect(screen.getByText('Plan step').closest('a')!.getAttribute('href')).toBe('#/task/DEMO-3')
+  const row = screen.getByText('Plan step').closest('li')!
+  expect(row.querySelector('.src')!.textContent).toBe('task')
+  expect(row.textContent).toContain('DEMO-3')
+})

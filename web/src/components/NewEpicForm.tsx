@@ -13,7 +13,7 @@ interface Props {
 }
 
 // The signed-in Access user is `name@domain`; a token principal has no '@' and falls back to owner.
-const localPart = (principal: unknown) =>
+export const localPart = (principal: unknown) =>
   typeof principal === 'string' && principal.includes('@') ? principal.split('@')[0] : 'owner'
 
 export default function NewEpicForm({ projects, initialProject = '', initialTitle = '', onCreated, onCancel }: Props) {

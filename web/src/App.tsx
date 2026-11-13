@@ -6,6 +6,7 @@ import Board from './screens/Board'
 import EpicDetail from './screens/EpicDetail'
 import NeedsYou from './screens/NeedsYou'
 import Stalled from './screens/Stalled'
+import TaskDetail from './screens/TaskDetail'
 import TasksBoard from './screens/TasksBoard'
 import Unfiled from './screens/Unfiled'
 import { useNarrow } from './useNarrow'
@@ -65,6 +66,15 @@ function current(hash: string): string {
   return hit ? hit.href : hash.startsWith('#/epic/') || hash.startsWith('#/task/') ? '' : '#/board'
 }
 
+// The key after `#/epic/` or `#/task/`; a malformed escape gives null (fall back to the board).
+function hashKey(hash: string, at: number): string | null {
+  try {
+    return decodeURIComponent(hash.slice(at))
+  } catch {
+    return null
+  }
+}
+
 export default function App() {
   const hash = useHash()
   const narrow = useNarrow()
@@ -76,13 +86,11 @@ export default function App() {
   else if (hash === '#/unfiled') screen = <Unfiled />
   else if (hash === '#/tasks') screen = <TasksBoard />
   else if (hash.startsWith('#/epic/') && hash.length > 7) {
-    let key: string | null = null
-    try {
-      key = decodeURIComponent(hash.slice(7))
-    } catch {
-      key = null // malformed escape: fall back to the board
-    }
+    const key = hashKey(hash, 7)
     screen = key ? <EpicDetail key={key} epicKey={key} /> : <Board />
+  } else if (hash.startsWith('#/task/') && hash.length > 7) {
+    const key = hashKey(hash, 7)
+    screen = key ? <TaskDetail key={key} taskKey={key} /> : <Board />
   } else screen = <Board />
   const badge = (n: (typeof NAV)[number]) => {
     const v = n.badge ? badges[n.badge] : null

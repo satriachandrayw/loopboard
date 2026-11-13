@@ -81,3 +81,12 @@ export function linksText(summary: Record<string, { count: number; state: string
     })
     .join(' · ')
 }
+
+export const STATUS_TEXT: Record<string, string> = {
+  todo: 'Todo', in_progress: 'In progress', review: 'Review', done: 'Done', canceled: 'Canceled',
+}
+
+// One chip per source: `🗂 1 card done`, `⑂ 2 PRs merged`.
+export function linkChips(summary: Record<string, { count: number; state: string }>): string[] {
+  return Object.entries(summary).map(([src, s]) => linksText({ [src]: s }))
+}

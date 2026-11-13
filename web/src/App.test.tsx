@@ -92,3 +92,13 @@ it('test_view_switch_routes_between_board_and_tasks', async () => {
   expect(within(nav).getByRole('link', { name: 'Board' }).getAttribute('aria-current')).toBe('page')
   localStorage.clear()
 })
+
+it('test_task_hash_opens_task_detail', async () => {
+  stubApi({ ...routes, '/api/tasks/DEMO-3': { id: 3, key: 'DEMO-3', type: 'task', summary: 'Detail summary', description: 'd',
+    done_when: 'w', project_key: 'DEMO', epic_key: null, status: 'todo', flags: [], reason: 'Moved by hand', priority: 'medium',
+    owner: 'coder', waiting_on: 'agent:coder', waiting_since: 1, stalled: false, refs: [], reporter: 'owner', links_summary: {},
+    last_activity_at: 1, merged_into: null, done_confirmed_at: null, created_at: 1, updated_at: 1, links: [], events: [] } })
+  window.location.hash = '#/task/DEMO-3'
+  render(<App />)
+  expect(await screen.findByText('Detail summary')).toBeTruthy()
+})

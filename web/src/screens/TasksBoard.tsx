@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { apiGet, apiPost, AuthError } from '../api'
+import NewTaskForm from '../components/NewTaskForm'
 import ProjectChips from '../components/ProjectChips'
 import TaskCard from '../components/TaskCard'
 import TokenPrompt from '../components/TokenPrompt'
 import ViewSwitch from '../components/ViewSwitch'
-import { announceChange, nowSeconds, TASK_COLUMNS, waitKind } from '../format'
+import { announceChange, nowSeconds, TASK_COLUMNS, taskHref, waitKind } from '../format'
 import { useProject, useProjects } from '../project'
 import { useNarrow } from '../useNarrow'
 import type { TaskLane, TasksBoardResponse, TaskView } from '../types'
@@ -61,6 +62,7 @@ export default function TasksBoard() {
   const [error, setError] = useState<string | null>(null)
   const [folded, setFolded] = useState<string[]>(() => (project ? readFolded(project) : []))
   const [tab, setTab] = useState(0)
+  const [adding, setAdding] = useState(false)
   const seq = useRef(0)
 
   useEffect(() => setFolded(project ? readFolded(project) : []), [project])
@@ -135,6 +137,7 @@ export default function TasksBoard() {
             <option value="source">a source</option>
           </select>
         </label>
+        {project && <button type="button" className="btn add-task" onClick={() => setAdding(true)}>+ Task</button>}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       {!project ? (
@@ -193,6 +196,19 @@ export default function TasksBoard() {
             )
           })}
         </>
+      )}
+      {adding && (
+        <NewTaskForm
+          projects={projects}
+          initialProject={project}
+          onCancel={() => setAdding(false)}
+          onCreated={async (key) => {
+            setAdding(false)
+            await load()
+            announceChange()
+            window.location.hash = taskHref(key)
+          }}
+        />
       )}
     </main>
   )

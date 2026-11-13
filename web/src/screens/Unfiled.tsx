@@ -2,91 +2,81 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiGet, apiPost, AuthError } from '../api'
 import Menu from '../components/Menu'
 import type { MenuItem } from '../components/Menu'
-import NewEpicForm from '../components/NewEpicForm'
+import NewTaskForm from '../components/NewTaskForm'
 import ProjectChips from '../components/ProjectChips'
 import TokenPrompt from '../components/TokenPrompt'
 import { announceChange, ageSince, isOpenItem } from '../format'
 import { useProject, useProjects, withProject } from '../project'
 import { useApi } from '../useApi'
-import type { BoardResponse, Card, Project, UnfiledRow } from '../types'
+import type { TaskLane, TasksBoardResponse, UnfiledRow } from '../types'
 
-type Filing = { filing: 'epic'; epic_key: string } | { filing: 'standalone'; project_key: string } | { filing: 'ignored' }
+// One write per row: link it to a task, or file it as ignored.
+type Write = { path: string; body: unknown }
 
-interface NewEpicFor {
-  ids: number[]
-  project: string
-  title: string
-}
+const OPEN_TASK = ['todo', 'in_progress', 'review']
 
-// Open epics (every board column but Done) to file into.
-function useOpenEpics(): [Card[], () => void] {
-  const [epics, setEpics] = useState<Card[]>([])
+// Open tasks of the given projects, as menu entries grouped by lane (epic, then No epic).
+function useOpenTasks(projects: string[]): [Record<string, TaskLane[]>, () => void] {
+  const [byProject, setByProject] = useState<Record<string, TaskLane[]>>({})
   const [tick, setTick] = useState(0)
+  const wanted = [...new Set(projects)].sort().join(',')
   useEffect(() => {
     let live = true
-    apiGet<BoardResponse>('/api/board')
-      .then((b) => {
-        if (live && Array.isArray(b?.columns))
-          setEpics(b.columns.filter((c) => c.column !== 'done').flatMap((c) => c.cards))
-      })
-      .catch(() => {})
+    const keys = wanted ? wanted.split(',') : []
+    void Promise.all(keys.map((p) =>
+      apiGet<TasksBoardResponse>(`/api/projects/${encodeURIComponent(p)}/tasks`)
+        .then((b) => [p, Array.isArray(b?.lanes) ? b.lanes : []] as const)
+        .catch(() => [p, []] as const),
+    )).then((pairs) => { if (live) setByProject(Object.fromEntries(pairs)) })
     return () => { live = false }
-  }, [tick])
-  return [epics, () => setTick((t) => t + 1)]
+  }, [wanted, tick])
+  return [byProject, () => setTick((t) => t + 1)]
 }
 
-// Epics of the given project when it has any, else every open epic.
-function epicsFor(epics: Card[], project: string | null): Card[] {
-  const mine = project ? epics.filter((e) => e.project_key === project) : []
-  return mine.length > 0 ? mine : epics
+function taskItems(lanes: TaskLane[], pick: (key: string) => void): MenuItem[] {
+  return lanes.flatMap((lane) => {
+    const group = lane.epic ? `${lane.epic.key} · ${lane.epic.title}` : 'No epic'
+    return OPEN_TASK.flatMap((c) => lane.tasks[c] ?? [])
+      .sort((a, b) => a.id - b.id)
+      .map((t) => ({ label: `${t.key} · ${t.summary}`, group, onSelect: () => pick(t.key) }))
+  })
 }
 
-const sharedProject = (rows: UnfiledRow[]) => {
-  const keys = new Set(rows.map((r) => r.project_key))
-  return keys.size === 1 ? [...keys][0] : null
+// The one project these rows belong to: their own when they agree, else the chip's.
+function projectOf(rows: UnfiledRow[], chipProject: string): string {
+  const keys = new Set(rows.map((r) => r.project_key).filter((k): k is string => !!k))
+  return keys.size === 1 ? [...keys][0] : keys.size === 0 ? chipProject : ''
+}
+
+interface NewTaskFor {
+  ids: number[]
+  project: string
+  summary: string
 }
 
 interface ActionsProps {
   rows: UnfiledRow[]
-  epics: Card[]
-  projects: Project[] | null
+  tasks: Record<string, TaskLane[]>
   chipProject: string
   busy: boolean
-  run: (rows: UnfiledRow[], body: (r: UnfiledRow) => Filing) => void
-  newEpic: (f: NewEpicFor) => void
+  run: (rows: UnfiledRow[], write: (r: UnfiledRow) => Write) => void
+  newTask: (f: NewTaskFor) => void
 }
 
-// File to epic ▾ · Standalone · Ignore, for one row or for the bulk selection.
-function Actions({ rows, epics, projects, chipProject, busy, run, newEpic }: ActionsProps) {
-  const shared = sharedProject(rows)
-  const fileItems: MenuItem[] = [
-    ...epicsFor(epics, shared).map((e) => ({
-      label: `${e.key} · ${e.title}`,
-      onSelect: () => run(rows, () => ({ filing: 'epic', epic_key: e.key })),
-    })),
-    {
-      label: '+ New epic…',
-      onSelect: () => newEpic({ ids: rows.map((r) => r.id), project: shared ?? chipProject, title: rows.length === 1 ? rows[0].title : '' }),
-    },
-  ]
-  const projectOf = (r: UnfiledRow) => r.project_key || chipProject
-  const allKnown = rows.every((r) => projectOf(r))
+// Link to task ▾ · New task from this… · Ignore, for one row or for the bulk selection.
+function Actions({ rows, tasks, chipProject, busy, run, newTask }: ActionsProps) {
+  const project = projectOf(rows, chipProject)
+  const items = taskItems(tasks[project] ?? [], (key) =>
+    run(rows, (r) => ({ path: `/api/items/${r.id}/link`, body: { task_key: key } })))
   return (
     <div className="btns">
-      <Menu label="File to epic ▾" items={fileItems} disabled={busy} />
-      {allKnown ? (
-        <button type="button" className="btn g" disabled={busy}
-          onClick={() => run(rows, (r) => ({ filing: 'standalone', project_key: projectOf(r) }))}>
-          Standalone
-        </button>
-      ) : (
-        <Menu label="Standalone ▾" className="btn g" disabled={busy}
-          items={(projects ?? []).map((p) => ({
-            label: p.name,
-            onSelect: () => run(rows, (r) => ({ filing: 'standalone', project_key: projectOf(r) || p.key })),
-          }))} />
-      )}
-      <button type="button" className="btn g" disabled={busy} onClick={() => run(rows, () => ({ filing: 'ignored' }))}>
+      <Menu label="Link to task ▾" disabled={busy || items.length === 0} items={items} />
+      <button type="button" className="btn g" disabled={busy}
+        onClick={() => newTask({ ids: rows.map((r) => r.id), project, summary: rows[0].title })}>
+        {rows.length === 1 ? 'New task from this…' : 'New task from these…'}
+      </button>
+      <button type="button" className="btn g" disabled={busy}
+        onClick={() => run(rows, (r) => ({ path: `/api/items/${r.id}/filing`, body: { filing: 'ignored' } }))}>
         Ignore
       </button>
     </div>
@@ -96,23 +86,24 @@ function Actions({ rows, epics, projects, chipProject, busy, run, newEpic }: Act
 export default function Unfiled() {
   const [project] = useProject()
   const projects = useProjects()
-  const [epics, reloadEpics] = useOpenEpics()
   const { data, setData, needsAuth, setNeedsAuth, error, setError, load } =
     useApi<UnfiledRow[]>(withProject('/api/unfiled', project), 'Could not load.')
   const [showDone, setShowDone] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [progress, setProgress] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [newEpicFor, setNewEpicFor] = useState<NewEpicFor | null>(null)
+  const [newTaskFor, setNewTaskFor] = useState<NewTaskFor | null>(null)
 
   const all = useMemo(() => (Array.isArray(data) ? data : []), [data])
   const openRows = all.filter(isOpenItem)
   const doneCount = all.length - openRows.length
   const shown = showDone ? all : openRows
   const picked = shown.filter((r) => selected.has(r.id))
+  const [tasks, reloadTasks] = useOpenTasks(
+    [...shown.map((r) => r.project_key ?? project), project].filter((k): k is string => !!k))
 
   // Sequential, so the count is honest; the first failure stops the run and is shown.
-  const run = async (rows: UnfiledRow[], body: (r: UnfiledRow) => Filing) => {
+  const run = async (rows: UnfiledRow[], write: (r: UnfiledRow) => Write) => {
     setBusy(true)
     setError(null)
     const filed: number[] = []
@@ -121,7 +112,8 @@ export default function Unfiled() {
     try {
       for (const r of rows) {
         try {
-          await apiPost(`/api/items/${r.id}/filing`, body(r))
+          const w = write(r)
+          await apiPost(w.path, w.body)
         } catch (e) {
           if (e instanceof AuthError) setNeedsAuth(true)
           else setError(`Filing "${r.title}" failed; stopped after ${filed.length} of ${rows.length}.`)
@@ -149,14 +141,14 @@ export default function Unfiled() {
       return n
     })
   const allPicked = shown.length > 0 && picked.length === shown.length
-  const actionProps = { epics, projects, chipProject: project, busy, newEpic: setNewEpicFor,
-    run: (rows: UnfiledRow[], body: (r: UnfiledRow) => Filing) => void run(rows, body) }
+  const actionProps = { tasks, chipProject: project, busy, newTask: setNewTaskFor,
+    run: (rows: UnfiledRow[], write: (r: UnfiledRow) => Write) => void run(rows, write) }
 
   return (
     <main className="screen list">
       <div className="top">
         <h1 className="t">Unfiled</h1>
-        <p className="s">{`Found by connectors, not yet in an epic · ${openRows.length} open`}</p>
+        <p className="s">{`Found by connectors, not yet linked to a task · ${openRows.length} open`}</p>
       </div>
       <div className="filters">
         <ProjectChips projects={projects} />
@@ -202,17 +194,23 @@ export default function Unfiled() {
           ))}
         </ul>
       </div>
-      {newEpicFor && (
-        <NewEpicForm
+      {newTaskFor && (
+        <NewTaskForm
           projects={projects}
-          initialProject={newEpicFor.project}
-          initialTitle={newEpicFor.title}
-          onCancel={() => setNewEpicFor(null)}
+          initialProject={newTaskFor.project}
+          initialSummary={newTaskFor.summary}
+          itemId={newTaskFor.ids[0]}
+          onCancel={() => setNewTaskFor(null)}
           onCreated={async (key) => {
-            const ids = new Set(newEpicFor.ids)
-            setNewEpicFor(null)
-            reloadEpics()
-            await run(all.filter((r) => ids.has(r.id)), () => ({ filing: 'epic', epic_key: key }))
+            const [first, ...rest] = newTaskFor.ids
+            setNewTaskFor(null)
+            setData((d) => (Array.isArray(d) ? d.filter((r) => r.id !== first) : d))
+            setSelected((s) => new Set([...s].filter((id) => id !== first)))
+            announceChange()
+            const others = new Set(rest)
+            if (others.size)
+              await run(all.filter((r) => others.has(r.id)), (r) => ({ path: `/api/items/${r.id}/link`, body: { task_key: key } }))
+            reloadTasks()
           }}
         />
       )}

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 export interface MenuItem {
   label: string
   onSelect: () => void
+  group?: string // items sharing a group follow one heading
 }
 
 interface Props {
@@ -36,12 +37,17 @@ export default function Menu({ label, items, className = 'btn', disabled }: Prop
       </button>
       {open && (
         <ul role="menu">
-          {items.map((m) => (
-            <li key={m.label}>
-              <button type="button" role="menuitem" onClick={() => { setOpen(false); m.onSelect() }}>
-                {m.label}
-              </button>
-            </li>
+          {items.map((m, i) => (
+            <Fragment key={m.label}>
+              {m.group !== undefined && m.group !== items[i - 1]?.group && (
+                <li role="presentation" className="mh">{m.group}</li>
+              )}
+              <li>
+                <button type="button" role="menuitem" onClick={() => { setOpen(false); m.onSelect() }}>
+                  {m.label}
+                </button>
+              </li>
+            </Fragment>
           ))}
         </ul>
       )}

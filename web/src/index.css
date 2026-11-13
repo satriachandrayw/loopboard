@@ -180,20 +180,43 @@ input[type='checkbox'] { accent-color: var(--acc); margin: 0; }
 .facts dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: 12px; }
 .facts dt { color: var(--mute); }
 .facts dd { margin: 0; }
-.task-group .sec { margin-top: 8px; }
-.tasks { padding: 2px 12px; }
-.task { display: flex; gap: 8px; align-items: center; padding: 8px 2px; border-bottom: 1px solid var(--line); }
-.task:last-child { border: 0; }
-.task-title { flex: 1; }
-.task-wait { color: var(--mute); font-size: 11px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: 0 0 auto; }
-.dot-done .dot { background: var(--green); }
-.dot-in_progress .dot { background: var(--acc); }
-.dot-blocked .dot { background: var(--red); }
-.dot-review .dot { background: var(--you); }
 .relations li { font-size: 12.5px; padding: 2px 0; }
 .log { font-size: 12px; color: var(--mute); padding: 4px 2px; }
 .log b { color: var(--text); font-weight: 600; }
+
+
+/* Tasks: status pills, epic task list, task detail, new task form (mockup #s3, #s4). */
+.status { font-size: 10.5px; padding: 1px 7px; border-radius: 5px; background: var(--lbl-bg); color: var(--mute); white-space: nowrap; }
+.status.st-in_progress { background: #1f2440; color: var(--btn-text); }
+.status.st-review { background: #2c2210; color: var(--you); }
+.status.st-done { background: #16281f; color: var(--green); }
+.status.st-blocked, .status.st-canceled { background: #2d1c1c; color: var(--red); }
+.box { padding: 10px 14px; }
+.box .goal { white-space: pre-line; }
+.box .dw { color: var(--mute); margin-top: 2px; }
+table.t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.t td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t tr:last-child td { border-bottom: 0; }
+table.t td.st { width: 110px; }
+table.t a { color: var(--text); }
+.epic-tasks td.k { width: 96px; }
+.epic-tasks td.wh { width: 70px; font-weight: 600; }
+.chips-line { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.chips-line .s { margin: 0; }
+.chip-link { font-size: 10.5px; color: var(--mute); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+.add { background: transparent; border: 0; padding: 0; color: var(--acc); cursor: pointer; font-size: 12.5px; }
+.note { color: var(--mute); font-size: 12px; margin: 8px 6px; }
+.task-detail .dh { display: flex; gap: 6px; align-items: center; }
+.task-detail .top .t { margin-top: 6px; }
+.task-detail .top .s a { color: var(--acc); }
+.btn.danger { background: #2d1c1c; border-color: var(--red-line); color: var(--red); }
+.add-task { margin-left: 6px; }
+.dialog.wide { max-width: 560px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field .req { color: var(--red); font-style: normal; }
+.field em { font-style: normal; color: var(--dim); }
+.dialog .note { margin: 10px 0 0; }
+.menu .mh { font-size: 10.5px; color: var(--mute); text-transform: uppercase; letter-spacing: .05em; padding: 6px 8px 2px; }
 
 .token-prompt { max-width: 360px; margin: 48px auto; display: flex; flex-direction: column; gap: 8px; }
 .token-prompt input { background: var(--col); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: block; width: 100%; margin-top: 4px; }
@@ -206,4 +229,6 @@ input[type='checkbox'] { accent-color: var(--acc); margin: 0; }
   .filters { flex-wrap: nowrap; overflow-x: auto; padding: 8px 10px; }
   .chips { flex-wrap: nowrap; }
   .chip { white-space: nowrap; }
+  .two { grid-template-columns: 1fr; gap: 0; }
+  .epic-tasks td.k { width: 72px; }
 }

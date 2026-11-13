@@ -1,6 +1,6 @@
 import ProjectChips from '../components/ProjectChips'
 import TokenPrompt from '../components/TokenPrompt'
-import { ageSince, epicHref } from '../format'
+import { ageSince, epicHref, taskHref } from '../format'
 import { useProject, useProjects, withProject } from '../project'
 import { useApi } from '../useApi'
 import type { NeedsYouRow } from '../types'
@@ -24,8 +24,8 @@ export default function NeedsYou() {
         <ul className="rows">
           {rows.map((r) => {
             const age = ageSince(r.waiting_since)
-            const href = r.kind === 'epic' ? epicHref(r.ref) : r.url
-            const ext = r.kind !== 'epic'
+            const href = r.kind === 'epic' ? epicHref(r.ref) : r.kind === 'task' ? taskHref(r.ref) : r.url
+            const ext = r.kind === 'item'
             return (
               <li key={`${r.kind}:${r.id}`} className="card">
                 <div className="h">
@@ -35,14 +35,14 @@ export default function NeedsYou() {
                   {age && <span className="pill you">{age}</span>}
                 </div>
                 <div className="meta">
-                  <span className="src">{r.kind === 'epic' ? 'epic' : r.ref.split(':')[0]}</span>
-                  {` ${r.ref}`}
+                  <span className="src">{r.kind === 'item' ? r.ref.split(':')[0] : r.kind}</span>
+                  {` ${r.ref}${r.kind === 'task' && r.epic_key ? ` · ${r.epic_key}` : ''}`}
                 </div>
                 {r.reasons.length > 0 && <div className="next">{`→ ${r.reasons.join(' · ')}`}</div>}
                 {href && (
                   <div className="btns">
                     <a className="btn" href={href} {...(ext ? { target: '_blank', rel: 'noreferrer' } : {})}>
-                      {r.kind === 'epic' ? 'Open card' : 'Open ↗'}
+                      {r.kind === 'epic' ? 'Open card' : r.kind === 'task' ? 'Open task' : 'Open ↗'}
                     </a>
                   </div>
                 )}

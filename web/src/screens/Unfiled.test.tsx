@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Unfiled from './Unfiled'
 import { clearToken } from '../token'
-import { board, epicCard, json, posts, PROJECTS, stubApi, urls } from '../test/api'
+import { board, epicCard, json, posts, PROJECTS, stubApi, taskView, urls } from '../test/api'
 
 beforeEach(() => clearToken())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -23,8 +23,19 @@ const BOARD = board({
   todo: [epicCard(1, 'todo', { title: 'Demo epic' }), epicCard(2, 'todo', { key: 'SAMPLE-E1', title: 'Sample epic', project_key: 'SAMPLE' })],
   done: [epicCard(3, 'done', { title: 'Old epic' })],
 })
+const lane = (epic: { key: string; title: string } | null, tasks: Record<string, unknown[]>) =>
+  ({ epic: epic && { ...epic, progress: { done: 0, total: 1 } }, tasks: { todo: [], in_progress: [], review: [], done: [], ...tasks } })
+const DEMO_TASKS = { project: 'DEMO', columns: ['todo', 'in_progress', 'review', 'done'], lanes: [
+  lane({ key: 'DEMO-E1', title: 'Demo epic' }, { todo: [taskView(1, 'todo')], review: [taskView(3, 'review')], done: [taskView(4, 'done')] }),
+  lane(null, { in_progress: [taskView(2, 'in_progress', { epic_key: null })] }),
+] }
+const SAMPLE_TASKS = { project: 'SAMPLE', columns: ['todo', 'in_progress', 'review', 'done'], lanes: [
+  lane({ key: 'SAMPLE-E1', title: 'Sample epic' }, { todo: [taskView(8, 'todo', { key: 'SAMPLE-8', project_key: 'SAMPLE', summary: 'Sample task' })] }),
+  lane(null, {}),
+] }
 const routes = (extra: Record<string, unknown> = {}) => ({
-  '/api/unfiled': ROWS, '/api/board': BOARD, '/api/projects': PROJECTS, ...extra,
+  '/api/unfiled': ROWS, '/api/board': BOARD, '/api/projects': PROJECTS,
+  '/api/projects/DEMO/tasks': DEMO_TASKS, '/api/projects/SAMPLE/tasks': SAMPLE_TASKS, ...extra,
 })
 const row = (title: string) => screen.getByText(title).closest('li')!
 
@@ -62,68 +73,60 @@ it('test_project_chip_filters_unfiled', async () => {
   await waitFor(() => expect(urls(f)).toContain('/api/unfiled?project=DEMO'))
 })
 
-it('test_file_to_epic_lists_open_epics_of_the_item_project_and_posts', async () => {
-  const f = stubApi(routes({ 'POST /api/items/1/filing': {} }))
-  render(<Unfiled />)
+it('test_link_to_task_menu_groups_by_epic', async () => {
+  const f = stubApi(routes({ 'POST /api/items/1/link': {} }))
+  const { container } = render(<Unfiled />)
   await screen.findByText('Open one')
-  await userEvent.click(within(row('Open one')).getByRole('button', { name: 'File to epic ▾' }))
-  const items = screen.getAllByRole('menuitem').map((m) => m.textContent)
-  expect(items).toEqual(['DEMO-E1 · Demo epic', '+ New epic…'])
-  await userEvent.click(screen.getByRole('menuitem', { name: 'DEMO-E1 · Demo epic' }))
-  await waitFor(() => expect(posts(f)).toEqual([{ url: '/api/items/1/filing', body: { filing: 'epic', epic_key: 'DEMO-E1' } }]))
+  const r = row('Open one')
+  expect(within(r).getAllByRole('button').map((b) => b.textContent)).toEqual(['Link to task ▾', 'New task from this…', 'Ignore'])
+  await userEvent.click(within(r).getByRole('button', { name: 'Link to task ▾' }))
+  expect([...container.querySelectorAll('.menu .mh')].map((h) => h.textContent)).toEqual(['DEMO-E1 · Demo epic', 'No epic'])
+  expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['DEMO-1 · Task 1', 'DEMO-3 · Task 3', 'DEMO-2 · Task 2'])
+  await userEvent.click(screen.getByRole('menuitem', { name: 'DEMO-3 · Task 3' }))
+  await waitFor(() => expect(posts(f)).toEqual([{ url: '/api/items/1/link', body: { task_key: 'DEMO-3' } }]))
   await waitFor(() => expect(screen.queryByText('Open one')).toBeNull())
 })
 
-it('test_file_to_epic_without_project_lists_all_open_epics', async () => {
-  stubApi(routes())
-  render(<Unfiled />)
-  await screen.findByText('Open three')
-  await userEvent.click(within(row('Open three')).getByRole('button', { name: 'File to epic ▾' }))
-  expect(screen.getAllByRole('menuitem').map((m) => m.textContent))
-    .toEqual(['DEMO-E1 · Demo epic', 'SAMPLE-E1 · Sample epic', '+ New epic…'])
+it('test_link_to_task_without_project_uses_the_chip_project', async () => {
+  localStorage.setItem('loopboard.project', 'SAMPLE')
+  try {
+    stubApi(routes())
+    render(<Unfiled />)
+    await screen.findByText('Open three')
+    await userEvent.click(within(row('Open three')).getByRole('button', { name: 'Link to task ▾' }))
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['SAMPLE-8 · Sample task'])
+  } finally {
+    localStorage.removeItem('loopboard.project')
+  }
 })
 
-it('test_new_epic_from_row_prefills_creates_then_files', async () => {
+it('test_new_task_from_unfiled_row_links_item', async () => {
   const f = stubApi(routes({
     '/api/health': { ok: true, principal: 'owner' },
-    'POST /api/projects/SAMPLE/epics': { id: 9, key: 'SAMPLE-E2', title: 'Open two' },
-    'POST /api/items/2/filing': {},
+    'POST /api/projects/SAMPLE/tasks': taskView(9, 'review', { key: 'SAMPLE-9' }),
   }))
   render(<Unfiled />)
   await screen.findByText('Open two')
-  await userEvent.click(within(row('Open two')).getByRole('button', { name: 'File to epic ▾' }))
-  await userEvent.click(screen.getByRole('menuitem', { name: '+ New epic…' }))
-  const dialog = screen.getByRole('dialog', { name: 'New epic' })
-  expect((within(dialog).getByLabelText('Title') as HTMLInputElement).value).toBe('Open two')
-  expect((within(dialog).getByLabelText('Project') as HTMLSelectElement).value).toBe('SAMPLE')
-  await userEvent.type(within(dialog).getByLabelText('Description'), 'Why')
-  await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
-  await waitFor(() => expect(posts(f).map((p) => p.url)).toEqual(['/api/projects/SAMPLE/epics', '/api/items/2/filing']))
-  expect(posts(f)[0].body.goal).toBe('Why')
-  expect(posts(f)[1].body).toEqual({ filing: 'epic', epic_key: 'SAMPLE-E2' })
+  await userEvent.click(within(row('Open two')).getByRole('button', { name: 'New task from this…' }))
+  const dialog = screen.getByRole('dialog', { name: 'New task' })
+  expect((within(dialog).getByLabelText(/^Summary/) as HTMLInputElement).value).toBe('Open two')
+  expect((within(dialog).getByLabelText(/^Project/) as HTMLSelectElement).value).toBe('SAMPLE')
+  await userEvent.type(within(dialog).getByLabelText(/^Description/), 'Why')
+  await userEvent.type(within(dialog).getByLabelText(/^Done when/), 'Live')
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Create task' }))
+  await waitFor(() => expect(posts(f).map((p) => p.url)).toEqual(['/api/projects/SAMPLE/tasks']))
+  expect(posts(f)[0].body).toMatchObject({ summary: 'Open two', item_id: 2, description: 'Why', done_when: 'Live' })
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(screen.queryByText('Open two')).toBeNull()
 })
 
-it('test_standalone_uses_the_item_project_and_ignore_posts_ignored', async () => {
+it('test_ignore_posts_ignored', async () => {
   const f = stubApi(routes())
   render(<Unfiled />)
-  await screen.findByText('Open one')
-  await userEvent.click(within(row('Open one')).getByRole('button', { name: 'Standalone' }))
-  await waitFor(() => expect(posts(f)).toHaveLength(1))
-  expect(posts(f)[0]).toEqual({ url: '/api/items/1/filing', body: { filing: 'standalone', project_key: 'DEMO' } })
+  await screen.findByText('Open two')
   await userEvent.click(within(row('Open two')).getByRole('button', { name: 'Ignore' }))
-  await waitFor(() => expect(posts(f)).toHaveLength(2))
-  expect(posts(f)[1]).toEqual({ url: '/api/items/2/filing', body: { filing: 'ignored' } })
+  await waitFor(() => expect(posts(f)).toEqual([{ url: '/api/items/2/filing', body: { filing: 'ignored' } }]))
   await waitFor(() => expect(screen.queryByText('Open two')).toBeNull())
-})
-
-it('test_standalone_without_project_offers_a_project_menu', async () => {
-  const f = stubApi(routes())
-  render(<Unfiled />)
-  await screen.findByText('Open three')
-  await userEvent.click(within(row('Open three')).getByRole('button', { name: 'Standalone ▾' }))
-  await userEvent.click(screen.getByRole('menuitem', { name: 'Sample' }))
-  await waitFor(() => expect(posts(f)).toEqual([{ url: '/api/items/5/filing', body: { filing: 'standalone', project_key: 'SAMPLE' } }]))
 })
 
 it('test_bulk_ignore_three_selected_sends_three_posts_with_progress', async () => {
@@ -153,16 +156,17 @@ it('test_bulk_stops_on_first_failure_and_shows_the_error', async () => {
   expect(screen.getByText('Open two')).toBeTruthy()
 })
 
-it('test_bulk_file_to_epic_posts_each_item', async () => {
+it('test_bulk_link_to_task_posts_each_item', async () => {
   const f = stubApi(routes())
   render(<Unfiled />)
   await screen.findByText('Open one')
   await userEvent.click(screen.getByLabelText('Select Open one'))
   await userEvent.click(screen.getByLabelText('Select Open three'))
-  await userEvent.click(within(screen.getByRole('toolbar', { name: 'Bulk actions' })).getByRole('button', { name: 'File to epic ▾' }))
-  await userEvent.click(screen.getByRole('menuitem', { name: 'SAMPLE-E1 · Sample epic' }))
+  await userEvent.click(within(screen.getByRole('toolbar', { name: 'Bulk actions' })).getByRole('button', { name: 'Link to task ▾' }))
+  await userEvent.click(screen.getByRole('menuitem', { name: 'DEMO-1 · Task 1' }))
   await waitFor(() => expect(posts(f)).toHaveLength(2))
-  expect(posts(f).map((p) => p.body)).toEqual([1, 2].map(() => ({ filing: 'epic', epic_key: 'SAMPLE-E1' })))
+  expect(posts(f).map((p) => p.url)).toEqual(['/api/items/1/link', '/api/items/5/link'])
+  expect(posts(f).map((p) => p.body)).toEqual([{ task_key: 'DEMO-1' }, { task_key: 'DEMO-1' }])
 })
 
 it('test_no_typed_keys', async () => {
@@ -170,21 +174,4 @@ it('test_no_typed_keys', async () => {
   render(<Unfiled />)
   await screen.findByText('Open one')
   expect(screen.queryAllByRole('textbox')).toHaveLength(0)
-})
-
-it('test_new_epic_from_row_without_description_files_nothing', async () => {
-  const f = stubApi(routes({
-    '/api/health': { ok: true, principal: 'owner' },
-    'POST /api/projects/SAMPLE/epics': { id: 9, key: 'SAMPLE-E2', title: 'Open two' },
-    'POST /api/items/2/filing': {},
-  }))
-  render(<Unfiled />)
-  await screen.findByText('Open two')
-  await userEvent.click(within(row('Open two')).getByRole('button', { name: 'File to epic ▾' }))
-  await userEvent.click(screen.getByRole('menuitem', { name: '+ New epic…' }))
-  const dialog = screen.getByRole('dialog', { name: 'New epic' })
-  await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
-  expect(within(dialog).getByRole('alert').textContent).toBe('Add a description: what this epic is for.')
-  expect(posts(f)).toEqual([])
-  expect(screen.getByRole('dialog', { name: 'New epic' })).toBeTruthy()
 })

@@ -1,6 +1,6 @@
 import ProjectChips from '../components/ProjectChips'
 import TokenPrompt from '../components/TokenPrompt'
-import { epicHref, formatAge, who } from '../format'
+import { epicHref, formatAge, taskHref, who } from '../format'
 import { useProject, useProjects, withProject } from '../project'
 import { useApi } from '../useApi'
 import type { StalledRow, WaitingGroup } from '../types'
@@ -44,6 +44,8 @@ export default function Stalled() {
                         <span className="ti">
                           {r.kind === 'epic' ? (
                             <a href={epicHref(r.ref)}>{r.title}</a>
+                          ) : r.kind === 'task' ? (
+                            <a href={taskHref(r.ref)}>{r.title}</a>
                           ) : r.url ? (
                             <a href={r.url} target="_blank" rel="noreferrer">{r.title}</a>
                           ) : (
@@ -53,8 +55,8 @@ export default function Stalled() {
                         <span className={`pill ${PILL[g]}`}>{`${name} · ${formatAge(r.stalled_for_hours * 3600)}`}</span>
                       </div>
                       <div className="meta">
-                        <span className="src">{r.kind === 'epic' ? 'epic' : (r.source ?? r.ref.split(':')[0])}</span>
-                        {` ${r.kind === 'epic' ? r.ref : (r.external_id ?? r.ref)}`}
+                        <span className="src">{r.kind === 'item' ? (r.source ?? r.ref.split(':')[0]) : r.kind}</span>
+                        {` ${r.kind === 'item' ? (r.external_id ?? r.ref) : r.ref}${r.kind === 'task' && r.epic_key ? ` · ${r.epic_key}` : ''}`}
                       </div>
                     </li>
                   )
