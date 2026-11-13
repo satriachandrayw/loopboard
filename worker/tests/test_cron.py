@@ -65,3 +65,12 @@ async def test_cron_stall_transitions_for_tasks(repo):
     assert [(r["subject_type"], r["subject_id"]) for r in ev] == [("task", t)]
     await repo.execute("update tasks set last_activity_at=? where id=?", (NOW, t))
     assert await cron.run_stall_transitions(repo, now=NOW + 1) == {"started": 0, "cleared": 1}
+
+
+async def test_cron_epic_with_only_a_planned_task_uses_planned_threshold(repo):
+    e = await mk_epic(repo, last=NOW - 300 * H)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 30 * H)
+    assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 0, "cleared": 0}
+    assert await cron.run_stall_transitions(repo, now=NOW + 139 * H) == {"started": 2, "cleared": 0}
+    ev = await repo.query("select subject_type from events where kind='stall.started'")
+    assert sorted(r["subject_type"] for r in ev) == ["epic", "task"]

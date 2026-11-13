@@ -16,9 +16,16 @@ def ep(manual="todo", age_h=0):
             "done_confirmed_at": None, "done_at": None, "last_activity_at": NOW - int(age_h * H)}
 
 
-def stalled(epic, items, th=None):
-    tasks = [derive_task(tk(), [i]) for i in items]
-    return epic_stalled(epic, items, derive_epic(epic, tasks, NOW), NOW, th or {})
+def row(task, items):
+    """A load_tasks row."""
+    return {"task": task, "derived": derive_task(task, items), "items": items}
+
+
+def stalled(epic, items, th=None, tasks=None):
+    """`tasks` are extra load_tasks rows; each item also gets its own task, as the backfill does."""
+    rows = [row(tk(), [i]) for i in items] + (tasks or [])
+    return epic_stalled(epic, items, rows, derive_epic(epic, [r["derived"] for r in rows], NOW), NOW,
+                        th or {})
 
 
 def tk(status="todo", age_h=0):
@@ -68,6 +75,50 @@ def test_empty_todo_epic_uses_own_activity():
     e["last_activity_at"] -= 1
     assert stalled(e, []) is True
     assert stalled(ep(age_h=1), []) is False
+
+
+def test_epic_with_only_planned_tasks_uses_planned_threshold():
+    # no open items, one open planned task: 7 days over the newest of epic and task activity
+    assert stalled(ep(age_h=200), [], tasks=[row(tk(age_h=167), [])]) is False
+    assert stalled(ep(age_h=168), [], tasks=[row(tk(age_h=200), [])]) is False
+    t = tk(age_h=168)
+    t["last_activity_at"] -= 1
+    assert stalled(ep(age_h=200), [], tasks=[row(t, [])]) is True
+    e = ep(age_h=168)
+    e["last_activity_at"] -= 1
+    assert stalled(e, [], tasks=[row(tk(age_h=200), [])]) is True
+    # the newest open task counts
+    assert stalled(ep(age_h=200), [], tasks=[row(t, []), row(tk(age_h=30), [])]) is False
+    # the owner can set `planned`
+    assert stalled(ep(age_h=200), [], {"planned": 48}, tasks=[row(tk(age_h=48), [])]) is False
+    t = tk(age_h=48)
+    t["last_activity_at"] -= 1
+    assert stalled(ep(age_h=200), [], {"planned": 48}, tasks=[row(t, [])]) is True
+
+
+def test_epic_with_only_done_or_canceled_tasks_keeps_24h():
+    canceled = row(tk("canceled", age_h=1), [])
+    done = tk("done", age_h=1)
+    done["done_confirmed_at"] = NOW - H
+    # canceled tasks only: 24 h over the epic's own activity; the task's newer activity doesn't count
+    e = ep(age_h=24)
+    e["last_activity_at"] -= 1
+    assert stalled(e, [], tasks=[canceled]) is True
+    assert stalled(ep(age_h=24), [], tasks=[canceled]) is False
+    # confirmed done tasks only: the epic is done, never stalled
+    assert stalled(ep(age_h=500), [], tasks=[row(done, [])]) is False
+    # done tasks next to a planned one don't move the epic: the planned task's activity counts
+    old = tk(age_h=169)
+    assert stalled(ep(age_h=169), [], tasks=[row(old, []), row(done, []), canceled]) is True
+    # an unconfirmed done task is in review, so it is open work
+    review = tk("done", age_h=30)
+    assert stalled(ep(age_h=30), [], tasks=[row(review, [])]) is False
+
+
+def test_epic_open_items_win_over_planned_tasks():
+    planned = [row(tk(age_h=0), [])]
+    assert stalled(ep(), [it(age_h=5)], {"planned": 1}, tasks=planned) is False
+    assert stalled(ep(), [it(age_h=30)], {"planned": 1000}, tasks=planned) is True
 
 
 def test_epic_threshold_is_shortest_source():

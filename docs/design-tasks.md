@@ -66,6 +66,7 @@ A task is **stalled** when it is open and nothing moved (the task itself or any 
 - The epic column is derived from its tasks with the same rules as before, now over task statuses: any task in progress → In progress; else any in review → Review; all done → Done; no tasks → the epic's manual column (Done if a human confirmed it).
 - Progress = done tasks / tasks (canceled tasks excluded).
 - Epic flags are the union of its tasks' flags; `review_owner` is `human` when any task in review waits on a human or awaits confirmation.
+- An open epic is stalled when its open items have not moved for longer than the smallest threshold among their sources. An epic whose only open work is planned tasks (no open items) uses the `planned` threshold (7 days by default) over the newest of its own and those tasks' activity, so it stalls no sooner than its tasks. An epic with no open items and no open tasks stalls after 24 h of its own inactivity.
 
 ## Linking items to tasks
 

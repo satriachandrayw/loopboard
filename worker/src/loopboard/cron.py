@@ -25,7 +25,7 @@ async def run_stall_transitions(repo, *, now: int) -> dict:
         e = row["epic"]
         if e["manual_column"] == "canceled":
             canceled.add(e["id"])
-        check("epics", "epic", e, epic_stalled(e, row["items"], _derive(row, now), now, th))
+        check("epics", "epic", e, epic_stalled(e, row["items"], row["tasks"], _derive(row, now), now, th))
     for row in await load_tasks(repo):
         t = row["task"]
         check("tasks", "task", t,

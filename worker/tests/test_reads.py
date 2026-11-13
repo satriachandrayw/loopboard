@@ -501,3 +501,19 @@ async def test_stalled_planned_source_row_sets_threshold_for_tasks_without_links
     assert [r["ref"] for r in await reads.stalled(repo, now=NOW) if r["kind"] == "task"] == []
     rows = [r for r in await reads.stalled(repo, now=NOW + 1) if r["kind"] == "task"]
     assert [(r["ref"], r["stalled_for_hours"]) for r in rows] == [("DEMO-1", 48.0)]
+
+
+async def test_epic_with_only_a_planned_task_stalls_after_7_days(repo):
+    # the epic itself is old; its only open work is a planned task (no links)
+    e = await mk_epic(repo, last=NOW - 300 * H)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 30 * H)
+
+    def epics(rows):
+        return [r["ref"] for r in rows if r["kind"] == "epic"]
+
+    assert epics(await reads.stalled(repo, now=NOW)) == []
+    assert col(await reads.board(repo, now=NOW), "todo")["cards"][0]["stalled"] is False
+    later = NOW + 139 * H  # the task is 169 h old
+    assert epics(await reads.stalled(repo, now=later)) == ["DEMO-E1"]
+    assert col(await reads.board(repo, now=later), "todo")["cards"][0]["stalled"] is True
+    assert (await reads.epic_detail(repo, key="DEMO-E1", now=later))["epic"]["stalled"] is True

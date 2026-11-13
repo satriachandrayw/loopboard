@@ -90,7 +90,7 @@ def _waiting_since(epic, items) -> int:
     return max([epic["last_activity_at"]] + [i["last_activity_at"] for i in open_items(items)])
 
 
-def _card(e, items, d, now, th) -> dict:
+def _card(e, items, tasks, d, now, th) -> dict:
     return {
         "id": e["id"], "key": e["key"], "title": e["title"], "goal": e["goal"],
         "project_key": e["project_key"],
@@ -98,7 +98,7 @@ def _card(e, items, d, now, th) -> dict:
         "progress": {"done": d.done, "total": d.total},
         "owner": e["owner"], "waiting_on": e["waiting_on"],
         "waiting_since": _waiting_since(e, items),
-        "stalled": epic_stalled(e, items, d, now, th),
+        "stalled": epic_stalled(e, items, tasks, d, now, th),
         "flags": d.flags, "review_owner": d.review_owner,
     }
 
@@ -160,7 +160,7 @@ async def board(repo, *, now, project_key=None, waiting_on=None) -> dict:
             continue
         if waiting_on and group_of(e["waiting_on"]) != waiting_on:
             continue
-        cols[d.board_column].append(_card(e, items, d, now, th))
+        cols[d.board_column].append(_card(e, items, row["tasks"], d, now, th))
     out = []
     for c, label in COLUMNS:
         cards = sorted(cols[c], key=lambda x: x["id"])
@@ -255,7 +255,7 @@ async def stalled(repo, *, now, waiting_on=None, project_key=None) -> list[dict]
         if e["manual_column"] == "canceled":
             canceled.add(e["id"])
         d = _derive(row, now)
-        if epic_stalled(e, items, d, now, th):
+        if epic_stalled(e, items, row["tasks"], d, now, th):
             add("epic", e["id"], e["key"], e["title"], e["waiting_on"], _waiting_since(e, items), {})
     pid = await _project_id(repo, project_key)
     for row in await load_tasks(repo, project_id=pid) if pid is not None else await load_tasks(repo):
@@ -313,7 +313,7 @@ async def epic_detail(repo, *, key, now):
     th = await thresholds(repo)
     row = _epic_row(e, await load_tasks(repo, epic_ids=[e["id"]]))
     d = _derive(row, now)
-    card = _card(e, row["items"], d, now, th)
+    card = _card(e, row["items"], row["tasks"], d, now, th)
     card.update({k: e[k] for k in ("next_step", "home_url", "spec_url", "plan_url")})
     tasks = [_view(t, now, th) for t in row["tasks"] if t["derived"].status != "canceled"]
     tsub = "select id from tasks where epic_id = ?"

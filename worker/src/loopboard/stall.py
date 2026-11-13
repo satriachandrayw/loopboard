@@ -13,14 +13,25 @@ def item_stalled(item: dict, now: int, thresholds: dict[str, float]) -> bool:
     return now - item["last_activity_at"] > threshold_hours(thresholds, item["source"]) * 3600
 
 
-def epic_stalled(epic: dict, items: list[dict], derived: Derived, now: int,
+OPEN_TASK_STATUSES = ("todo", "in_progress", "review")
+
+
+def epic_stalled(epic: dict, items: list[dict], tasks: list[dict], derived: Derived, now: int,
                  thresholds: dict[str, float]) -> bool:
-    if derived.board_column not in ("todo", "in_progress", "review"):
+    """Open items: the smallest threshold among their sources, over the newest of them. Else open
+    tasks (load_tasks rows; planned work): the `planned` threshold over the newest of the epic and
+    those tasks. Else 24 h over the epic's own activity."""
+    if derived.board_column not in OPEN_TASK_STATUSES:
         return False
     op = open_items(items)
     if op:
         limit = min(threshold_hours(thresholds, i["source"]) for i in op)
         newest = max(i["last_activity_at"] for i in op)
+        return now - newest > limit * 3600
+    open_tasks = [t["task"] for t in tasks if t["derived"].status in OPEN_TASK_STATUSES]
+    if open_tasks:
+        limit = float(thresholds.get(PLANNED_SOURCE, PLANNED_STALL_HOURS))
+        newest = max([epic["last_activity_at"]] + [t["last_activity_at"] for t in open_tasks])
         return now - newest > limit * 3600
     return now - epic["last_activity_at"] > STALL_DEFAULT_HOURS * 3600
 
@@ -29,7 +40,7 @@ def task_stalled(task: dict, items: list[dict], derived: TaskDerived, now: int,
                  thresholds: dict[str, float]) -> bool:
     """Open and nothing moved (the task or a live link) for longer than the smallest threshold
     among its links' sources, or the `planned` threshold (7 days by default) without links."""
-    if derived.status not in ("todo", "in_progress", "review"):
+    if derived.status not in OPEN_TASK_STATUSES:
         return False
     links = live_links(items)
     if links:
