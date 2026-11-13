@@ -116,3 +116,34 @@ async def test_0002_backfill_keeps_board_unchanged():
     # after the migration the board reads tasks: removing the items' filing must not move it
     await repo.execute("update items set filing = 'unfiled', epic_id = null")
     assert board_shape(await reads.board(repo, now=NOW)) == before
+
+
+async def _add_epic_with_items(repo, seq, key, manual, cats):
+    eid = await repo.execute(
+        "insert into epics(project_id,seq,key,title,goal,manual_column,board_column,stage,waiting_on,"
+        "last_activity_at,created_at,updated_at) values(1,?,?,?,'g',?,?,'build','agent:a',?,1,1)",
+        (seq, key, key, manual, manual, NOW - 10))
+    for n, cat in enumerate(cats):
+        await repo.execute(
+            "insert into items(source,external_id,project_id,epic_id,filing,title,status_category,waiting_on,"
+            "last_activity_at,created_at,updated_at) values('kanban',?,1,?,'epic','t',?,'agent:a',?,1,1)",
+            (f"{key}-{n}", eid, cat, NOW - 100))
+
+
+async def test_0002_board_changes_only_by_lifecycle_rules():
+    """The owner accepted two board moves the task lifecycle makes; every other epic keeps its column."""
+    db, repo = await seeded_0001()
+    # (a) only a blocked Kanban card: was its manual column (todo), now In progress with `blocked`.
+    await _add_epic_with_items(repo, 3, "DEMO-E3", "todo", ["blocked"])
+    # (b) only done Kanban cards, no code: was Review awaiting confirmation, now Done.
+    await _add_epic_with_items(repo, 4, "DEMO-E4", "todo", ["done", "done"])
+    migrate(db)
+    after = board_shape(await reads.board(repo, now=NOW))
+    cards = {k: (col, d, t, flags) for col, xs in after.items() for (k, d, t, flags) in xs}
+    assert cards["DEMO-E3"] == ("in_progress", 0, 1, ("blocked",))
+    assert cards["DEMO-E4"] == ("done", 2, 2, ())
+    # (c) the existing fixture's epics read as before
+    assert cards["SAMPLE-E1"] == ("todo", 1, 2, ())
+    assert cards["DEMO-E1"] == ("review", 0, 2, ("merged_not_live",))
+    assert "DEMO-E2" not in cards
+
