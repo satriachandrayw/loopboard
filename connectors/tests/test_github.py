@@ -680,6 +680,11 @@ def test_title_prefix_sets_epic_key_and_strips_title():
     assert i.to_payload()["epic_key"] == "DEMO-E5"
 
 
+def test_task_prefix_sets_task_key_and_strips_title():
+    i = _pr_titled("[DEMO-12] fix(OPS-8001): retry")
+    assert (i.task_key, i.epic_key, i.title) == ("DEMO-12", None, "fix(OPS-8001): retry")
+
+
 def test_title_prefix_stripped_before_truncation():
     i = _pr_titled("[DEMO-E5] " + "x" * 500)
     assert i.epic_key == "DEMO-E5" and i.title == "x" * 300

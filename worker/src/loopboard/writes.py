@@ -271,7 +271,7 @@ def item_origin(item: dict) -> str:
     return item.get("url") or f"{item['source']}:{item['external_id']}"
 
 
-def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now) -> list:
+def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now, via="api") -> list:
     """Insert a task made from an item (epic tag, filing) and its task.created event. The item is
     found by (source, external_id), so it may be inserted later in the same batch."""
     owner = ((item.get("owner") or "").strip() or item["source"])[:100]
@@ -285,8 +285,9 @@ def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now) ->
          "(select id from items where source = ? and external_id = ?), ?, ?, ?)",
          (project_id, epic_id, seq, key, summary, f"Created from {item_origin(item)}", AUTO_DONE_WHEN, owner,
           item.get("waiting_on"), actor, item["source"], item["external_id"], now, now, now)),
-        (EVENT_BY_SQL.format(table="tasks", where="key = ?"),
-         (now, actor, "task", "task.created", json.dumps(payload), key)),
+        ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
+         "select ?, ?, ?, 'task', id, 'task.created', ? from tasks where key = ?",
+         (now, actor, via, json.dumps(payload), key)),
     ]
 
 

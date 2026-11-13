@@ -10,7 +10,7 @@ A connector reads one external source and pushes its items to Loopboard through
   unparseable output or missing field fails the whole run and nothing is posted.
 - Map: each source record becomes an `Item` (`source`, `external_id`, `title`, `url`,
   `status_category`, `raw_status`, `owner`, `waiting_on`, `blocked_reason`, `next_step`,
-  `project_key`, `epic_key`, `last_activity_at`, `merged_at`, `live_at`).
+  `project_key`, `epic_key`, `task_key`, `last_activity_at`, `merged_at`, `live_at`).
 - `last_activity_at` is the newest activity timestamp the source offers, as ISO 8601 with `Z`
   or an offset. Ingest skips a payload older than the stored value.
 - Upsert-only: a listing never cancels, unfiles or deletes an item that is absent from it.
@@ -26,34 +26,49 @@ A connector reads one external source and pushes its items to Loopboard through
   "project_key": "DEMO", "last_activity_at": "2025-11-12T09:00:00Z"}]}
 ```
 
-At most 100 items per request; the runner splits larger listings. `epic_key` is omitted when
-unset so ingest keeps any existing filing. Open items need `waiting_on` of the form
+At most 100 items per request; the runner splits larger listings. `epic_key` and `task_key` are
+omitted when unset so ingest keeps any existing filing. Open items need `waiting_on` of the form
 `agent:<name>`, `human:<name>` or `source:<name>`. The response is
-`{"accepted","created","updated","skipped_older","unknown_epic"}`. A token bound to another source gets 403.
+`{"accepted","created","updated","skipped_older","unknown_epic","linked_task","auto_tasks","unknown_task"}`.
+A token bound to another source gets 403.
 
-## Filing by title prefix
+## Linking by title prefix and refs
 
-Both connectors file an item under an epic when its title (a Kanban card title or a GitHub PR
-title) starts with the epic key in square brackets. The title must match
-`^\s*\[([A-Z][A-Z0-9]{1,9}-E[0-9]+)\]\s*(.+)$`: the key becomes `epic_key` and the prefix is
-stripped from the stored title (before the 300-character cut).
+Both connectors read a task or epic key from the start of a title (a Kanban card title or a GitHub
+PR title) in square brackets. The title must match
+`^\s*\[([A-Z][A-Z0-9]{1,9}-(?:E[0-9]+|[0-9]+))\]\s*(.+)$`: a task key (`DEMO-12`) becomes
+`task_key`, an epic key (`DEMO-E5`) becomes `epic_key`, and the prefix is stripped from the stored
+title (before the 300-character cut).
 
-| Title | `epic_key` | Stored title |
-| --- | --- | --- |
-| `[DEMO-E5] Add checkout retry` | `DEMO-E5` | `Add checkout retry` |
-| `  [DEMO-E12]Fix login` | `DEMO-E12` | `Fix login` |
-| `Add checkout retry [DEMO-E5]` | none | unchanged |
-| `fix: [DEMO-E5] retry` | none | unchanged |
-| `[demo-e5] Add checkout retry` | none | unchanged |
-| `[DEMO5] Add checkout retry` | none | unchanged |
+| Title | `task_key` | `epic_key` | Stored title |
+| --- | --- | --- | --- |
+| `[DEMO-12] Add checkout retry` | `DEMO-12` | none | `Add checkout retry` |
+| `[DEMO-E5] Add checkout retry` | none | `DEMO-E5` | `Add checkout retry` |
+| `  [DEMO-E12]Fix login` | none | `DEMO-E12` | `Fix login` |
+| `Add checkout retry [DEMO-12]` | none | none | unchanged |
+| `fix: [DEMO-E5] retry` | none | none | unchanged |
+| `[demo-e5] Add checkout retry` | none | none | unchanged |
+| `[DEMO5] Add checkout retry` | none | none | unchanged |
 
 Only the leading position counts, and lowercase or malformed keys are ignored. The title is the
-only source of an epic key: bodies, descriptions, labels and comments are never read.
+only source of a key: bodies, descriptions, labels and comments are never read.
 
-Ingest files a tagged item only when it is new or still `unfiled`. An existing filing always wins:
-an item a human or Hermes filed under an epic, as standalone or as ignored keeps that filing, even
-if its title later carries a different tag. An unknown key, or the key of a canceled epic, does not
-fail the sync: the item lands (or stays) in Unfiled and is counted in `unknown_epic`.
+Ingest links a new or still `unfiled` item, in this order:
+
+1. `task_key` names a task → linked to it. A task merged into another resolves to the survivor.
+2. Else a **ref** of an open task in the item's project (another tracker's key, say `OPS-8001`)
+   appears in the title as a whole token → linked to that task. `fix(OPS-8001): retry` matches
+   ref `OPS-8001`; `OPS-80` does not match inside `OPS-8001`, and refs of other projects never match.
+3. Else `epic_key` names an open epic → a new task is made under it from the item (summary = title,
+   description `Created from <url or source:external_id>`, done when `The linked work is live.`,
+   owner = the item's owner or the source) and the item is linked to it.
+4. Else the item stays Unfiled.
+
+A linked item takes the task's project and epic. An existing filing always wins: an item a human
+or Hermes filed under an epic, as standalone or as ignored keeps it, even if its title later
+carries a key or a ref. Unknown keys never fail the sync: an unknown or canceled epic counts in
+`unknown_epic`, an unknown or canceled task in `unknown_task`. `linked_task` counts items linked by
+key or ref, `auto_tasks` the tasks made from epic tags.
 
 ## Hermes Kanban mapping
 
@@ -118,7 +133,7 @@ loopboard sync github --config PATH [--dry-run]
 ```
 
 It prints one JSON summary line, for example
-`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"unknown_epic":0,"posts":1,"dry_run":false}`.
+`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"unknown_epic":0,"linked_task":0,"auto_tasks":0,"unknown_task":0,"posts":1,"dry_run":false}`.
 `--cli-replay DIR` reads `list.json` and `show-<id>.json` from DIR instead of calling `hermes`.
 `--dry-run` collects and maps but posts nothing and needs no token.
 

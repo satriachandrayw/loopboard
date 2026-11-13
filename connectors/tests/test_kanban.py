@@ -320,3 +320,10 @@ def test_untagged_title_has_no_epic_key():
     task, show = mk("todo", title="Plain task")
     i = kanban.map_task(task, show, human="owner", tenants=TENANTS)
     assert (i.epic_key, i.title) == (None, "Plain task")
+
+
+def test_task_prefix_sets_task_key_and_strips_title():
+    task, show = mk("todo", title="[DEMO-12] Add checkout retry")
+    i = kanban.map_task(task, show, human="owner", tenants=TENANTS)
+    assert (i.task_key, i.epic_key, i.title) == ("DEMO-12", None, "Add checkout retry")
+    assert i.to_payload()["task_key"] == "DEMO-12"

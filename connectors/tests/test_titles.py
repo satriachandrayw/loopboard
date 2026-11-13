@@ -38,3 +38,30 @@ def test_prefix_only_at_start(title):
 ])
 def test_malformed_or_lowercase_prefix_ignored(title):
     assert split_epic_prefix(title) == (None, title)
+
+
+@pytest.mark.parametrize("title,epic,task,rest", [
+    ("[DEMO-E5] Add retry", "DEMO-E5", None, "Add retry"),
+    ("[DEMO-12] Add retry", None, "DEMO-12", "Add retry"),
+    ("[DEMO-12]Add retry", None, "DEMO-12", "Add retry"),
+    (" [X1-0]  y", None, "X1-0", "y"),
+    ("fix(OPS-8001): retry", None, None, "fix(OPS-8001): retry"),
+    ("Add retry [DEMO-12]", None, None, "Add retry [DEMO-12]"),
+    ("[demo-12] lowercase", None, None, "[demo-12] lowercase"),
+    ("[DEMO-12]", None, None, "[DEMO-12]"),
+    ("[DEMO-1E2] odd", None, None, "[DEMO-1E2] odd"),
+])
+def test_split_key_prefix_task_and_epic(title, epic, task, rest):
+    from loopboard_connectors.contract import split_key_prefix
+
+    assert split_key_prefix(title) == (epic, task, rest)
+
+
+def test_item_payload_carries_task_key_only_when_set():
+    from loopboard_connectors.contract import Item
+
+    base = dict(source="kanban", external_id="1", title="t", url=None, status_category="todo", raw_status="todo",
+                owner=None, waiting_on="agent:a", blocked_reason=None, next_step=None, project_key="DEMO",
+                epic_key=None, last_activity_at="2026-11-12T00:00:00Z")
+    assert "task_key" not in Item(**base).to_payload()
+    assert Item(**base, task_key="DEMO-3").to_payload()["task_key"] == "DEMO-3"

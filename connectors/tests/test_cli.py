@@ -294,3 +294,16 @@ def test_summary_carries_unknown_epic_defaulting_to_zero(tmp_path, capsys):
     assert code == 0 and summary(out)["unknown_epic"] == 2
     code, out, _ = run(tmp_path, capsys, "--dry-run")
     assert summary(out)["unknown_epic"] == 0
+
+
+def test_summary_carries_task_counters_defaulting_to_zero(tmp_path, capsys):
+    code, out, _ = run(tmp_path, capsys, post=Poster())
+    assert code == 0
+    assert {k: summary(out)[k] for k in ("linked_task", "auto_tasks", "unknown_task")} == {
+        "linked_task": 0, "auto_tasks": 0, "unknown_task": 0}
+
+    def post(url, body, headers):
+        n = len(json.loads(body)["items"])
+        return {"accepted": n, "created": n, "linked_task": 1, "auto_tasks": 2, "unknown_task": 3}
+    code, out, _ = run(tmp_path, capsys, post=post)
+    assert (summary(out)["linked_task"], summary(out)["auto_tasks"], summary(out)["unknown_task"]) == (1, 2, 3)

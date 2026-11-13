@@ -226,6 +226,7 @@ async def test_100_item_ingest_uses_bounded_d1_calls(client_for):
     assert r.status_code == 200 and r.json()["created"] == 100
     assert counter.calls <= 10, counter.calls
     assert len(await events(repo)) == 100
+    assert r.json()["auto_tasks"] == 34
 
     counter.calls = 0
     r = await post(client_for, app, t, items)
@@ -248,7 +249,6 @@ async def test_duplicate_new_item_in_batch_creates_then_updates(make_app, client
     assert [e["kind"] for e in await events(repo)] == ["item.created", "item.updated"]
 
 
-@pytest.mark.xfail(strict=True, reason="Task 5: an epic tag makes an auto-task")
 async def test_ingest_recomputes_epic_column(make_app, client_for):
     app, repo, t = await setup(make_app, client_for)
     await mk_epic(repo)
@@ -393,6 +393,18 @@ async def test_tag_never_overrides_existing_filing(make_app, client_for):
         assert after["title"] == "New"
     assert before["s"]["project_id"] == other
     assert not [e for e in await events(repo) if e["kind"] == "item.filed"]
+    # nor does a task key or a ref, and no auto-task is made
+    await mk_task(repo, "DEMO", key="DEMO-1", refs='["OPS-8001"]')
+    n_tasks = (await repo.first("select count(*) as n from tasks"))["n"]
+    r = await post(client_for, app, t, [item(external_id=x, task_key="DEMO-1", title="fix(OPS-8001): y",
+                                             last_activity_at="2026-11-12T11:00:00+07:00") for x in ("e", "s", "i")])
+    assert r.json()["updated"] == 3
+    for x in ("e", "s", "i"):
+        after = await row(repo, x)
+        assert (after["filing"], after["epic_id"], after["task_id"]) == \
+            (before[x]["filing"], before[x]["epic_id"], before[x]["task_id"]), x
+    assert (await repo.first("select count(*) as n from tasks"))["n"] == n_tasks
+    assert r.json()["linked_task"] == 0 and r.json()["auto_tasks"] == 0
 
 
 async def test_unknown_epic_key_does_not_fail_chunk(make_app, client_for):
@@ -429,7 +441,6 @@ async def test_ingest_response_has_unknown_epic_zero_by_default(make_app, client
     assert r.json()["unknown_epic"] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="Task 5: an epic tag makes an auto-task")
 async def test_tag_filing_emits_event_and_recomputes(make_app, client_for):
     app, repo, t = await setup(make_app, client_for)
     eid = await mk_epic(repo, "DEMO-E5")
@@ -454,3 +465,165 @@ async def test_tag_filing_emits_event_and_recomputes(make_app, client_for):
     created = json.loads((await events(repo))[-1]["payload"])
     assert (created["filing"], created["epic_id"]) == ("epic", e2)
     assert (await repo.first("select board_column from epics where id=?", (e2,)))["board_column"] == "review"
+
+
+# --- tasks ---
+
+async def mk_task(repo, pkey="DEMO", key=None, epic_key=None, status="todo", refs="[]", merged_into=None):
+    p = await repo.first("select id from projects where key=?", (pkey,))
+    pid = p["id"] if p else await repo.execute("insert into projects(key,name,created_at) values (?,?,1)", (pkey, pkey))
+    seq = int(key.split("-")[1])
+    eid = (await repo.first("select id from epics where key=?", (epic_key,)))["id"] if epic_key else None
+    return await repo.execute(
+        "insert into tasks(project_id,epic_id,seq,key,summary,description,done_when,status,owner,waiting_on,"
+        "reporter,refs,merged_into,last_activity_at,created_at,updated_at)"
+        " values(?,?,?,?,'s','d','w',?,'o','agent:a','tester',?,?,1,1,1)",
+        (pid, eid, seq, key, status, refs, merged_into))
+
+
+async def test_task_prefix_links_new_item(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E1")
+    tid = await mk_task(repo, key="DEMO-12", epic_key="DEMO-E1")
+    r = await post(client_for, app, t, [item(task_key="DEMO-12", status_category="in_progress")])
+    assert (r.json()["linked_task"], r.json()["unknown_task"], r.json()["auto_tasks"]) == (1, 0, 0)
+    x = await row(repo)
+    assert (x["task_id"], x["epic_id"], x["filing"]) == (tid, eid, "epic")
+    assert (await repo.first("select board_column from epics where id=?", (eid,)))["board_column"] == "in_progress"
+    created = json.loads((await events(repo))[0]["payload"])
+    assert created["task_key"] == "DEMO-12"
+    # a task with no epic: standalone; an unfiled item is linked on a later sync too
+    await mk_task(repo, key="DEMO-13")
+    await post(client_for, app, t, [item(external_id="b")])
+    await post(client_for, app, t, [item(external_id="b", task_key="DEMO-13", last_activity_at=T2)])
+    b = await row(repo, "b")
+    assert (b["filing"], b["epic_id"], b["project_id"]) == ("standalone", None, 1)
+    filed = [json.loads(e["payload"]) for e in await events(repo) if e["kind"] == "item.filed"]
+    assert filed[-1]["task_key"] == "DEMO-13"
+
+
+async def test_task_prefix_of_merged_task_links_survivor(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    a = await mk_task(repo, key="DEMO-1")
+    b = await mk_task(repo, key="DEMO-2", status="canceled", merged_into=a)
+    await mk_task(repo, key="DEMO-3", status="canceled", merged_into=b)
+    r = await post(client_for, app, t, [item(task_key="DEMO-3"), item(external_id="c", task_key="DEMO-4")])
+    assert (r.json()["linked_task"], r.json()["unknown_task"]) == (1, 1)
+    assert (await row(repo))["task_id"] == a
+    assert (await row(repo, "c"))["filing"] == "unfiled"
+
+
+async def test_ref_matches_whole_token_in_same_project_only(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo, "SAMPLE-E1", pkey="SAMPLE")
+    hit = await mk_task(repo, key="DEMO-1", refs='["OPS-8001"]')
+    await mk_task(repo, key="DEMO-2", refs='["OPS-80"]')
+    await mk_task(repo, key="DEMO-3", refs='["OPS-77"]', status="canceled")
+    await mk_task(repo, "SAMPLE", key="SAMPLE-1", refs='["OPS-9"]')
+    r = await post(client_for, app, t, [
+        item(external_id="a", title="fix(OPS-8001): retry", project_key="DEMO"),
+        item(external_id="b", title="OPS-80011 and XOPS-80 are not refs", project_key="DEMO"),
+        item(external_id="c", title="OPS-9 is SAMPLE's ref", project_key="DEMO"),
+        item(external_id="d", title="OPS-77 belongs to a canceled task", project_key="DEMO"),
+        item(external_id="e", title="OPS-8001 without a project")])
+    assert r.json()["linked_task"] == 1
+    assert (await row(repo, "a"))["task_id"] == hit and (await row(repo, "a"))["filing"] == "standalone"
+    for x in "bcde":
+        assert (await row(repo, x))["filing"] == "unfiled", x
+
+
+async def test_epic_prefix_creates_auto_task_and_links(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    eid = await mk_epic(repo, "DEMO-E5")
+    await mk_task(repo, key="DEMO-1")
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E5", title="Add retry", url="https://example.test/pr/1",
+                                             owner="coder", status_category="review", waiting_on="human:owner")])
+    assert r.json()["auto_tasks"] == 1
+    task = await repo.first("select * from tasks where key='DEMO-2'")
+    x = await row(repo)
+    assert (task["epic_id"], task["summary"], task["description"], task["done_when"], task["owner"],
+            task["reporter"], task["waiting_on"], task["status"]) == (
+        eid, "Add retry", "Created from https://example.test/pr/1", "The linked work is live.", "coder", "bot",
+        "human:owner", "todo")
+    assert task["origin_item_id"] == x["id"]
+    assert (x["task_id"], x["epic_id"], x["filing"]) == (task["id"], eid, "epic")
+    ev = await repo.first("select * from events where kind='task.created'")
+    assert (ev["subject_id"], ev["actor"], ev["via"]) == (task["id"], "bot", "ingest")
+    # without an owner the task's owner is the source; the description falls back to source:external_id
+    await post(client_for, app, t, [item(external_id="n", epic_key="DEMO-E5")])
+    t3 = await repo.first("select * from tasks where key='DEMO-3'")
+    assert (t3["owner"], t3["description"]) == ("kanban", "Created from kanban:n")
+
+
+async def test_two_items_same_epic_tag_get_two_tasks_in_one_batch(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo, "DEMO-E1")
+    await mk_epic(repo, "SAMPLE-E1", pkey="SAMPLE")
+    await mk_task(repo, key="DEMO-4")
+    r = await post(client_for, app, t, [item(external_id="a", epic_key="DEMO-E1"),
+                                        item(external_id="b", epic_key="DEMO-E1"),
+                                        item(external_id="c", epic_key="SAMPLE-E1"),
+                                        item(external_id="a", epic_key="DEMO-E1", title="again", last_activity_at=T2)])
+    assert r.json()["auto_tasks"] == 3
+    keys = {x: (await repo.first("select t.key from tasks t join items i on i.task_id=t.id where i.external_id=?",
+                                 (x,)))["key"] for x in "abc"}
+    assert keys == {"a": "DEMO-5", "b": "DEMO-6", "c": "SAMPLE-1"}
+
+
+async def test_lost_task_seq_race_retries(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_epic(repo, "DEMO-E1")
+    db = app.state.repo.db
+    orig = db.batch
+    calls = {"n": 0}
+
+    async def racing(stmts):
+        calls["n"] += 1
+        if calls["n"] == 1:  # someone else takes DEMO-1 just before our batch
+            await mk_task(repo, key="DEMO-1")
+        return await orig(stmts)
+
+    db.batch = racing
+    r = await post(client_for, app, t, [item(epic_key="DEMO-E1")])
+    assert r.status_code == 200 and r.json()["auto_tasks"] == 1
+    assert (await repo.first("select t.key from tasks t join items i on i.task_id=t.id"))["key"] == "DEMO-2"
+
+
+async def test_unknown_task_key_does_not_fail_chunk(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    await mk_task(repo, key="DEMO-1", status="canceled")
+    r = await post(client_for, app, t, [item(external_id="a", task_key="DEMO-9"), item(external_id="b", task_key="DEMO-1"),
+                                        item(external_id="c")])
+    assert r.status_code == 200 and r.json()["created"] == 3
+    assert (r.json()["unknown_task"], r.json()["linked_task"]) == (2, 0)
+    assert {(await row(repo, x))["filing"] for x in "abc"} == {"unfiled"}
+
+
+async def test_ingest_d1_calls_bounded(client_for):
+    """Base (before tasks) used 8 / 5 / 8 D1 calls for these three posts; tasks add at most 3."""
+    from loopboard.app import build_app
+    from loopboard.db import Repo
+    from tests.fakes.d1 import FakeD1
+
+    db = FakeD1()
+    db.apply_migrations()
+    repo = Repo(db)
+    app = build_app(db=db, clock=lambda: NOW)
+    t = await add_token(repo, name="bot", scopes="ingest", source="kanban")
+    await mk_epic(repo)
+    await mk_epic(repo, "DEMO-E2")
+    await mk_task(repo, key="DEMO-1", refs='["OPS-1"]')
+    items = [item(external_id=f"i{n}", project_key="DEMO", title=f"t {n}",
+                  **({"epic_key": f"DEMO-E{1 + n % 2}"} if n % 3 == 0 else
+                     {"task_key": "DEMO-1"} if n % 3 == 1 else {}))
+             for n in range(100)]
+    counter = CountingD1(db)
+    r = await post(client_for, app, t, items)
+    assert (r.json()["auto_tasks"], r.json()["linked_task"]) == (34, 33)
+    assert counter.calls <= 8 + 3, counter.calls
+    counter.calls = 0
+    await post(client_for, app, t, items)
+    assert counter.calls <= 5 + 3, counter.calls
+    counter.calls = 0
+    await post(client_for, app, t, [dict(x, title="new", last_activity_at=T2) for x in items])
+    assert counter.calls <= 8 + 3, counter.calls

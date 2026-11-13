@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .client import USER_AGENT
-from .contract import Item, SourceError, split_epic_prefix
+from .contract import Item, SourceError, split_key_prefix
 
 API = "https://api.github.com"
 TITLE_MAX = 300
@@ -77,11 +77,12 @@ def map_pr(pr: dict, *, checks, reviews, project_key, human, agent_logins: dict[
             waiting = human_tag
     html = pr.get("html_url") or ""
     repo = pr.get("_repo") or _repo_from_url(html)
-    epic_key, title = split_epic_prefix(pr.get("title") or "")
+    epic_key, task_key, title = split_key_prefix(pr.get("title") or "")
     return Item(source="github", external_id=f"{repo}#{repo_number}",
                 title=title[:TITLE_MAX], url=html or None,
                 status_category=cat, raw_status=raw, owner=agent_tag, waiting_on=waiting,
                 blocked_reason=None, next_step=None, project_key=project_key, epic_key=epic_key,
+                task_key=task_key,
                 last_activity_at=pr["updated_at"], merged_at=merged_at, live_at=live_at)
 
 
