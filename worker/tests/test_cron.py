@@ -59,7 +59,7 @@ async def test_cron_skips_tasks_of_canceled_epic_and_clears_stalled(repo):
 
 async def test_cron_stall_transitions_for_tasks(repo):
     e = await mk_epic(repo, last=NOW)
-    t = await mk_task(repo, epic_id=e, summary="planned", last=NOW - 25 * H)
+    t = await mk_task(repo, epic_id=e, summary="planned", last=NOW - 169 * H)
     assert await cron.run_stall_transitions(repo, now=NOW) == {"started": 1, "cleared": 0}
     ev = await repo.query("select * from events where kind='stall.started'")
     assert [(r["subject_type"], r["subject_id"]) for r in ev] == [("task", t)]

@@ -1,6 +1,6 @@
 """Stall rules (D10)."""
 from .derive import Derived, TaskDerived, effective_category, live_links, open_items
-from .model import OPEN_CATEGORIES, STALL_DEFAULT_HOURS
+from .model import OPEN_CATEGORIES, PLANNED_SOURCE, PLANNED_STALL_HOURS, STALL_DEFAULT_HOURS
 
 
 def threshold_hours(thresholds: dict[str, float], source: str) -> float:
@@ -28,10 +28,13 @@ def epic_stalled(epic: dict, items: list[dict], derived: Derived, now: int,
 def task_stalled(task: dict, items: list[dict], derived: TaskDerived, now: int,
                  thresholds: dict[str, float]) -> bool:
     """Open and nothing moved (the task or a live link) for longer than the smallest threshold
-    among its links' sources, or the 24 h default without links."""
+    among its links' sources, or the `planned` threshold (7 days by default) without links."""
     if derived.status not in ("todo", "in_progress", "review"):
         return False
     links = live_links(items)
-    limit = min((threshold_hours(thresholds, i["source"]) for i in links), default=STALL_DEFAULT_HOURS)
+    if links:
+        limit = min(threshold_hours(thresholds, i["source"]) for i in links)
+    else:
+        limit = float(thresholds.get(PLANNED_SOURCE, PLANNED_STALL_HOURS))
     newest = max([task["last_activity_at"]] + [i["last_activity_at"] for i in links])
     return now - newest > limit * 3600

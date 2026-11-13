@@ -80,7 +80,9 @@ lists merged, not live and blocked on input). Oldest first. With `project`, only
 Query: `waiting_on` (`agent|human|source`), `project` (key). Stalled epics (`kind: "epic"`) and
 stalled tasks (`kind: "task"`, with `epic_key`; tasks of canceled epics are left out). A task
 stalls when it is open and neither it nor a live link moved for longer than the smallest stall
-threshold of its links' sources (24 h without links). 200.
+threshold of its links' sources. A task with no live links (planned work nobody has started) uses
+the threshold of the `planned` source instead, 168 h (7 days) unless set with
+`PUT /api/sources/planned`. 200.
 
 ### GET /api/unfiled
 
@@ -184,7 +186,8 @@ Body: `{"from_type": "epic|item|task", "from_id", "to_type": "epic|item|task", "
 ### PUT /api/sources/{name}
 
 Body: `{"stall_hours": 24}` (greater than 0, at most 8760). Sets the stall threshold for a
-source. `name` matches `^[a-z][a-z0-9_-]{1,31}$` (else 422). 200.
+source. `name` matches `^[a-z][a-z0-9_-]{1,31}$` (else 422). The name `planned` is a pseudo-source:
+it sets the stall threshold for tasks with no live links (default 168 h, 7 days). 200.
 
 ## Tasks (scope `write`)
 

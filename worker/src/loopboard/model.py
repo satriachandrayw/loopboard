@@ -11,6 +11,9 @@ DAY = 86400
 DONE_HIDE_SECONDS = 7 * DAY
 REVIEW_WARN_AT = 3
 STALL_DEFAULT_HOURS = 24.0
+# Tasks without live links (planned work) stall after the `planned` pseudo-source threshold.
+PLANNED_SOURCE = "planned"
+PLANNED_STALL_HOURS = 168.0
 TASK_TYPES = ("task", "bug")
 TASK_STATUSES = ("todo", "in_progress", "review", "done", "canceled")
 PRIORITIES = ("high", "medium", "low")

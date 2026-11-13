@@ -486,9 +486,18 @@ async def test_task_detail_merged_away_reason(repo):
     assert (d["status"], d["reason"], d["merged_into"]) == ("canceled", "Merged into DEMO-1", "DEMO-1")
 
 
-async def test_stalled_lists_unstarted_planned_task_after_24h(repo):
+async def test_stalled_lists_unstarted_planned_task_after_7_days(repo):
     e = await mk_epic(repo, last=NOW)
-    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 24 * H)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 168 * H)
     assert [r["ref"] for r in await reads.stalled(repo, now=NOW) if r["kind"] == "task"] == []
     rows = [r for r in await reads.stalled(repo, now=NOW + 1) if r["kind"] == "task"]
-    assert [(r["ref"], r["title"], r["stalled_for_hours"]) for r in rows] == [("DEMO-1", "planned", 24.0)]
+    assert [(r["ref"], r["title"], r["stalled_for_hours"]) for r in rows] == [("DEMO-1", "planned", 168.0)]
+
+
+async def test_stalled_planned_source_row_sets_threshold_for_tasks_without_links(repo):
+    e = await mk_epic(repo, last=NOW)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 48 * H)
+    await repo.execute("insert into sources(name, stall_hours, updated_at) values ('planned', 48, 0)")
+    assert [r["ref"] for r in await reads.stalled(repo, now=NOW) if r["kind"] == "task"] == []
+    rows = [r for r in await reads.stalled(repo, now=NOW + 1) if r["kind"] == "task"]
+    assert [(r["ref"], r["stalled_for_hours"]) for r in rows] == [("DEMO-1", 48.0)]

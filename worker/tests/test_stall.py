@@ -76,11 +76,20 @@ def test_epic_threshold_is_shortest_source():
 
 
 def test_task_stalled_uses_min_link_threshold_and_default_without_links():
-    # no links: the 24 h default over the task's own activity (an unstarted planned task stalls)
-    assert t_stalled(tk(age_h=24), []) is False
-    t = tk(age_h=24)
+    # no links: the `planned` threshold (7 days by default) over the task's own activity
+    assert t_stalled(tk(age_h=25), []) is False
+    assert t_stalled(tk(age_h=167), []) is False
+    assert t_stalled(tk(age_h=168), []) is False
+    t = tk(age_h=168)
     t["last_activity_at"] -= 1
     assert t_stalled(t, []) is True
+    # the owner can set `planned` like any source
+    assert t_stalled(tk(age_h=48), [], {"planned": 48}) is False
+    t = tk(age_h=48)
+    t["last_activity_at"] -= 1
+    assert t_stalled(t, [], {"planned": 48}) is True
+    # an ignored link is not live, so the task still counts as planned
+    assert t_stalled(tk(age_h=30), [it(source="github", age_h=30, filing="ignored")], {"github": 4}) is False
     # links: the smallest threshold among their sources, over the newest of task and live links
     links = [it(source="github", age_h=5), it(source="kanban", age_h=5)]
     assert t_stalled(tk(age_h=30), links, {"github": 4}) is True
@@ -89,6 +98,10 @@ def test_task_stalled_uses_min_link_threshold_and_default_without_links():
     # an ignored link neither moves the task nor sets the threshold
     assert t_stalled(tk(age_h=5), [it(source="github", age_h=0, filing="ignored")], {"github": 4}) is False
     assert t_stalled(tk(age_h=5), [it(source="github", age_h=5, filing="ignored")], {"github": 4}) is False
+
+
+def test_planned_threshold_does_not_affect_linked_tasks():
+    assert t_stalled(tk(age_h=5), [it(source="github", age_h=5)], {"planned": 1, "github": 30}) is False
 
 
 def test_done_and_canceled_tasks_never_stalled():

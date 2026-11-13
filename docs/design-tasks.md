@@ -59,7 +59,7 @@ A task's **live links** are its linked items that are not `ignored` and whose ca
 
 Who is a human: a request signed in through Cloudflare Access, or an API token with the new `human` scope. Every other token is an agent.
 
-A task is **stalled** when it is open and nothing moved (the task itself or any live link) for longer than the stall threshold: the smallest threshold among its links' sources, or the 24 h default when it has no links. An unstarted planned task therefore shows as stalled, which is how a stale plan surfaces.
+A task is **stalled** when it is open and nothing moved (the task itself or any live link) for longer than the stall threshold: the smallest threshold among its links' sources, or, when it has no live links, the threshold of the `planned` pseudo-source: 7 days by default, configurable with `PUT /api/sources/planned`. An unstarted planned task therefore shows as stalled after a week, which is how a stale plan surfaces without flooding the list with work that isn't late.
 
 ## Epics on top of tasks
 
