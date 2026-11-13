@@ -106,10 +106,13 @@ async def test_0002_constraints_and_relations_accept_tasks():
 
 
 async def test_0002_backfill_keeps_board_unchanged():
+    # `before` is what the item-based board (base commit) showed for this data; the epic rows
+    # (column, done/total, flags) must read the same over the backfilled tasks.
+    before = {"backlog": [], "todo": [("SAMPLE-E1", 1, 2, ())],
+              "in_progress": [], "review": [("DEMO-E1", 0, 2, ("merged_not_live",))], "done": []}
     db, repo = await seeded_0001()
-    before = board_shape(await reads.board(repo, now=NOW))
     migrate(db)
-    after = board_shape(await reads.board(repo, now=NOW))
-    assert after == before
-    assert before["review"] == [("DEMO-E1", 0, 2, ("merged_not_live",))]
-    assert before["todo"] == [("SAMPLE-E1", 1, 2, ())]
+    assert board_shape(await reads.board(repo, now=NOW)) == before
+    # after the migration the board reads tasks: removing the items' filing must not move it
+    await repo.execute("update items set filing = 'unfiled', epic_id = null")
+    assert board_shape(await reads.board(repo, now=NOW)) == before

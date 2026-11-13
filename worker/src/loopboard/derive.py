@@ -138,12 +138,6 @@ def derive_epic(epic: dict, tasks: list[TaskDerived], now: int) -> Derived:
     return d
 
 
-def item_tasks(items: list[dict]) -> list[TaskDerived]:
-    """Transitional: one manual-todo task per filed item (replaced by real tasks in reads)."""
-    return [derive_task({"status": "canceled" if i["status_category"] == "canceled" else "todo",
-                         "waiting_on": i.get("waiting_on")}, [i]) for i in items]
-
-
 def open_items(items: list[dict]) -> list[dict]:
     return [i for i in items if i.get("filing") != "ignored"
             and effective_category(i) in OPEN_CATEGORIES]

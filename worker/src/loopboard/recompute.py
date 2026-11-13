@@ -1,7 +1,7 @@
 """Recompute and persist an epic's derived column (D1: update + event in one batch)."""
 import json
 
-from .derive import derive_epic, item_tasks
+from .derive import derive_epic
 
 IN_CHUNK = 99  # D1 allows 100 bound parameters per statement
 
@@ -17,8 +17,10 @@ def _qs(n: int) -> str:
 
 
 async def recompute_epics(repo, epic_ids, *, actor: str, via: str, now: int) -> dict[int, str]:
-    """Recompute many epics with a bounded number of D1 calls:
-    one epics select and one items select per 99 ids, and one write batch."""
+    """Recompute many epics from their tasks with a bounded number of D1 calls: per 99 ids one
+    epics select plus load_tasks' tasks and items selects, and one write batch."""
+    from .reads import load_tasks  # reads imports this module
+
     ids = sorted(set(epic_ids))
     if not ids:
         return {}
@@ -26,15 +28,14 @@ async def recompute_epics(repo, epic_ids, *, actor: str, via: str, now: int) -> 
     for part in chunks(ids):
         for e in await repo.query(f"select * from epics where id in ({_qs(len(part))})", part):
             epics[e["id"]] = e
-        for it in await repo.query(
-                f"select * from items where filing = 'epic' and epic_id in ({_qs(len(part))})", part):
-            by_epic[it["epic_id"]].append(it)
+    for t in await load_tasks(repo, epic_ids=ids):
+        by_epic[t["task"]["epic_id"]].append(t["derived"])
     out, stmts = {}, []
     for eid in ids:
         epic = epics.get(eid)
         if epic is None:
             continue
-        new = derive_epic(epic, item_tasks(by_epic[eid]), now).board_column
+        new = derive_epic(epic, by_epic[eid], now).board_column
         old = epic["board_column"]
         out[eid] = new
         if new == old:

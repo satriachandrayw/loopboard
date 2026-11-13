@@ -13,8 +13,13 @@ async def seed(repo, cat=None, merged=None, live=None, board="todo", done_at=Non
         "values(1,1,'DEMO-E1','E','todo',?,'build',?,?,1,1,1)", (board, done_at, confirmed))
     if cat:
         await repo.execute(
+            "insert into tasks(project_id,epic_id,seq,key,summary,description,done_when,owner,waiting_on,"
+            "reporter,last_activity_at,created_at,updated_at) "
+            "values(1,1,1,'DEMO-1','t','d','w','o','agent:a','tester',1,1,1)")
+        await repo.execute(
             "insert into items(source,external_id,epic_id,filing,title,status_category,merged_at,"
-            "live_at,last_activity_at,created_at,updated_at) values('kanban','1',1,'epic','t',?,?,?,1,1,1)",
+            "live_at,task_id,last_activity_at,created_at,updated_at) "
+            "values('kanban','1',1,'epic','t',?,?,?,1,1,1,1)",
             (cat, merged, live))
 
 
@@ -51,7 +56,7 @@ async def test_done_at_set_on_entering_done_and_cleared_on_leaving(repo):
     assert (await repo.first("select done_at from epics where id=1"))["done_at"] is None
 
 
-async def test_only_epic_filed_items_feed_derivation(repo):
+async def test_only_the_epics_tasks_feed_derivation(repo):
     await seed(repo, "review", board="todo")
-    await repo.execute("update items set filing='standalone'")
+    await repo.execute("update tasks set epic_id = null")
     assert await recompute_epic(repo, 1, actor="a", via="api", now=NOW) == "todo"

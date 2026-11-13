@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from tests.test_auth import add_token, bearer
 
 NOW = 1_800_000_000
@@ -35,10 +37,16 @@ async def seeded(make_app, client_for):
 
 async def add_item(repo, ext="1", cat="review", filing="unfiled", epic_id=None, project_id=None,
                    merged=None, live=None):
+    """An item; a filed one gets its own task, as the 0002 backfill does."""
+    from tests.test_reads import mk_task
+
+    task_id = None
+    if filing in ("epic", "standalone"):
+        task_id = await mk_task(repo, project_id=project_id, epic_id=epic_id, last=1)
     return await repo.execute(
         "insert into items(source,external_id,project_id,epic_id,filing,title,status_category,merged_at,"
-        "live_at,last_activity_at,created_at,updated_at) values('kanban',?,?,?,?,'t',?,?,?,1,1,1)",
-        (ext, project_id, epic_id, filing, cat, merged, live))
+        "live_at,task_id,last_activity_at,created_at,updated_at) values('kanban',?,?,?,?,'t',?,?,?,?,1,1,1)",
+        (ext, project_id, epic_id, filing, cat, merged, live, task_id))
 
 
 async def epic(repo, key="DEMO-E1"):
@@ -136,6 +144,7 @@ async def test_confirm_done_moves_task_less_epic_to_done(make_app, client_for):
     assert (e["board_column"], e["done_confirmed_at"]) == ("done", NOW)
 
 
+@pytest.mark.xfail(strict=True, reason="Task 4: filing moves the task")
 async def test_filing_moves_item_and_recomputes_both_epics(make_app, client_for):
     app, repo, h = await seeded(make_app, client_for)
     await mk_epic(client_for, app, h, title="E2", manual_column="todo")

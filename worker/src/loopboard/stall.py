@@ -7,18 +7,6 @@ def threshold_hours(thresholds: dict[str, float], source: str) -> float:
     return float(thresholds.get(source, STALL_DEFAULT_HOURS))
 
 
-ITEMS_FOR_STALL = (
-    "select i.*, e.manual_column as epic_manual_column, e.project_id as epic_project_id from items i "
-    "left join epics e on e.id = i.epic_id where i.filing in ('epic', 'standalone')")
-
-
-def stall_eligible(item: dict) -> bool:
-    """Standalone items and items filed to an epic that is not canceled (D6, D13)."""
-    if item.get("filing") == "standalone":
-        return True
-    return item.get("filing") == "epic" and item.get("epic_manual_column") != "canceled"
-
-
 def item_stalled(item: dict, now: int, thresholds: dict[str, float]) -> bool:
     if item.get("filing") == "ignored" or effective_category(item) not in OPEN_CATEGORIES:
         return False

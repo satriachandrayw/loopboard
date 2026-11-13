@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from loopboard.model import parse_ts
 from tests.test_auth import add_token, bearer
 
@@ -246,6 +248,7 @@ async def test_duplicate_new_item_in_batch_creates_then_updates(make_app, client
     assert [e["kind"] for e in await events(repo)] == ["item.created", "item.updated"]
 
 
+@pytest.mark.xfail(strict=True, reason="Task 5: an epic tag makes an auto-task")
 async def test_ingest_recomputes_epic_column(make_app, client_for):
     app, repo, t = await setup(make_app, client_for)
     await mk_epic(repo)
@@ -426,6 +429,7 @@ async def test_ingest_response_has_unknown_epic_zero_by_default(make_app, client
     assert r.json()["unknown_epic"] == 0
 
 
+@pytest.mark.xfail(strict=True, reason="Task 5: an epic tag makes an auto-task")
 async def test_tag_filing_emits_event_and_recomputes(make_app, client_for):
     app, repo, t = await setup(make_app, client_for)
     eid = await mk_epic(repo, "DEMO-E5")

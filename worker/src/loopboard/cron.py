@@ -1,9 +1,8 @@
-"""Stall transitions (cron): record stall.started / stall.cleared and stalled_since."""
+"""Stall transitions (cron): record stall.started / stall.cleared and stalled_since for epics and tasks."""
 import json
 
-from .derive import derive_epic, item_tasks
-from .reads import load_epics, thresholds
-from .stall import ITEMS_FOR_STALL, epic_stalled, item_stalled, stall_eligible
+from .reads import _derive, load_epics, load_tasks, thresholds
+from .stall import epic_stalled, task_stalled
 
 CHUNK = 40
 EVENT = ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
@@ -21,11 +20,19 @@ async def run_stall_transitions(repo, *, now: int) -> dict:
         elif not is_stalled and since is not None:
             changes.append((table, stype, row["id"], False))
 
+    canceled = set()
     for row in await load_epics(repo):
-        e, items = row["epic"], row["items"]
-        check("epics", "epic", e, epic_stalled(e, items, derive_epic(e, item_tasks(items), now), now, th))
-    for i in await repo.query(ITEMS_FOR_STALL + " or i.stalled_since is not null"):
-        check("items", "item", i, stall_eligible(i) and item_stalled(i, now, th))
+        e = row["epic"]
+        if e["manual_column"] == "canceled":
+            canceled.add(e["id"])
+        check("epics", "epic", e, epic_stalled(e, row["items"], _derive(row, now), now, th))
+    for row in await load_tasks(repo):
+        t = row["task"]
+        check("tasks", "task", t,
+              t["epic_id"] not in canceled and task_stalled(t, row["items"], row["derived"], now, th))
+    # Items no longer stall on their own (tasks do); clear any item stall left from before tasks.
+    for i in await repo.query("select id, stalled_since from items where stalled_since is not null"):
+        check("items", "item", i, False)
 
     started = cleared = 0
     for n in range(0, len(changes), CHUNK):
