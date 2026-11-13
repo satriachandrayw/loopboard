@@ -34,6 +34,7 @@ create index tasks_epic_id on tasks(epic_id);
 create index tasks_project_id on tasks(project_id);
 
 -- Backfill: one task per item filed to an epic or standalone, keys per project in item id order.
+-- An item canceled at its source gives a canceled task, so no epic's column or progress moves.
 insert into tasks(project_id, epic_id, seq, key, type, summary, description, done_when, status, priority,
                   owner, waiting_on, reporter, refs, origin_item_id, last_activity_at, created_at, updated_at)
 select f.project_id, f.epic_id,
@@ -41,11 +42,12 @@ select f.project_id, f.epic_id,
        p.key || '-' || row_number() over (partition by f.project_id order by f.id),
        'task', f.title,
        'Migrated from ' || coalesce(f.url, f.source || ':' || f.external_id),
-       'The linked work is live.', 'todo', 'medium',
+       'The linked work is live.', case when f.status_category = 'canceled' then 'canceled' else 'todo' end,
+       'medium',
        coalesce(nullif(trim(f.owner), ''), f.source), f.waiting_on, 'migration', '[]', f.id,
        f.last_activity_at, f.created_at, f.updated_at
 from (
-  select i.id, i.epic_id, i.title, i.url, i.source, i.external_id, i.owner, i.waiting_on,
+  select i.id, i.epic_id, i.title, i.url, i.source, i.external_id, i.owner, i.waiting_on, i.status_category,
          i.last_activity_at, i.created_at, i.updated_at,
          case when i.filing = 'epic' then e.project_id else i.project_id end as project_id
   from items i left join epics e on e.id = i.epic_id

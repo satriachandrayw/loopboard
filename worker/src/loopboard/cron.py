@@ -1,7 +1,7 @@
 """Stall transitions (cron): record stall.started / stall.cleared and stalled_since."""
 import json
 
-from .derive import derive_epic
+from .derive import derive_epic, item_tasks
 from .reads import load_epics, thresholds
 from .stall import ITEMS_FOR_STALL, epic_stalled, item_stalled, stall_eligible
 
@@ -23,7 +23,7 @@ async def run_stall_transitions(repo, *, now: int) -> dict:
 
     for row in await load_epics(repo):
         e, items = row["epic"], row["items"]
-        check("epics", "epic", e, epic_stalled(e, items, derive_epic(e, items, now), now, th))
+        check("epics", "epic", e, epic_stalled(e, items, derive_epic(e, item_tasks(items), now), now, th))
     for i in await repo.query(ITEMS_FOR_STALL + " or i.stalled_since is not null"):
         check("items", "item", i, stall_eligible(i) and item_stalled(i, now, th))
 

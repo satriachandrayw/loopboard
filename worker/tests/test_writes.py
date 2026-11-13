@@ -125,12 +125,11 @@ async def test_patch_recomputes_board_column(make_app, client_for):
     assert (await epic(repo))["board_column"] == "todo"
 
 
-async def test_confirm_done_moves_code_less_epic_to_done(make_app, client_for):
+async def test_confirm_done_moves_task_less_epic_to_done(make_app, client_for):
+    # Tasks design: an epic with tasks follows them; confirm-done decides only an epic without tasks.
     app, repo, h = await seeded(make_app, client_for)
-    eid = (await epic(repo))["id"]
-    await add_item(repo, "1", cat="done", epic_id=eid, filing="epic")
     await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"manual_column": "todo"})
-    assert (await epic(repo))["board_column"] == "review"
+    assert (await epic(repo))["board_column"] == "todo"
     r = await req(client_for, app, h, "POST", "/api/epics/DEMO-E1/confirm-done", {})
     assert r.status_code == 200
     e = await epic(repo)

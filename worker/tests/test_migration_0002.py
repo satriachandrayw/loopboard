@@ -44,6 +44,7 @@ async def seeded_0001():
     await item("6", project_id=1, filing="ignored")
     await item("7", epic_id=e2, project_id=1, filing="epic", cat="in_progress")
     await item("8", epic_id=s1, project_id=2, filing="epic", cat="todo")
+    await item("9", epic_id=s1, project_id=2, filing="epic", cat="canceled")
     return db, repo
 
 
@@ -61,12 +62,13 @@ async def test_0002_backfills_one_task_per_filed_item():
     migrate(db)
     tasks = await repo.query("select * from tasks order by id")
     by_item = {t["origin_item_id"]: t for t in tasks}
-    assert sorted(by_item) == [1, 2, 3, 4, 7, 8]
+    assert sorted(by_item) == [1, 2, 3, 4, 7, 8, 9]
     assert [t["key"] for t in tasks if t["project_id"] == 1] == ["DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4"]
     assert [by_item[i]["key"] for i in (1, 3, 4, 7)] == ["DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4"]
-    assert [by_item[i]["key"] for i in (2, 8)] == ["SAMPLE-1", "SAMPLE-2"]
+    assert [by_item[i]["key"] for i in (2, 8, 9)] == ["SAMPLE-1", "SAMPLE-2", "SAMPLE-3"]
+    assert by_item[9]["status"] == "canceled"
     for t in tasks:
-        assert t["reporter"] == "migration" and t["status"] == "todo"
+        assert t["reporter"] == "migration" and t["status"] == ("canceled" if t["id"] == by_item[9]["id"] else "todo")
         assert t["description"].startswith("Migrated from ")
         assert t["done_when"] == "The linked work is live."
         assert (t["type"], t["priority"], t["refs"]) == ("task", "medium", "[]")

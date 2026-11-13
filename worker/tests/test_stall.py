@@ -1,5 +1,5 @@
-from loopboard.derive import derive_epic
-from loopboard.stall import epic_stalled, item_stalled, threshold_hours
+from loopboard.derive import derive_epic, derive_task
+from loopboard.stall import epic_stalled, item_stalled, task_stalled, threshold_hours
 
 NOW = 1_800_000_000
 H = 3600
@@ -17,7 +17,17 @@ def ep(manual="todo", age_h=0):
 
 
 def stalled(epic, items, th=None):
-    return epic_stalled(epic, items, derive_epic(epic, items, NOW), NOW, th or {})
+    tasks = [derive_task(tk(), [i]) for i in items]
+    return epic_stalled(epic, items, derive_epic(epic, tasks, NOW), NOW, th or {})
+
+
+def tk(status="todo", age_h=0):
+    return {"id": 1, "status": status, "waiting_on": "agent:x", "done_confirmed_at": None,
+            "last_activity_at": NOW - int(age_h * H)}
+
+
+def t_stalled(task, items, th=None):
+    return task_stalled(task, items, derive_task(task, items), NOW, th or {})
 
 
 def test_item_stalled_after_default_24h():
@@ -63,3 +73,25 @@ def test_empty_todo_epic_uses_own_activity():
 def test_epic_threshold_is_shortest_source():
     items = [it(source="github", age_h=5), it(source="kanban", age_h=5)]
     assert stalled(ep(), items, {"github": 4, "kanban": 24}) is True
+
+
+def test_task_stalled_uses_min_link_threshold_and_default_without_links():
+    # no links: the 24 h default over the task's own activity (an unstarted planned task stalls)
+    assert t_stalled(tk(age_h=24), []) is False
+    t = tk(age_h=24)
+    t["last_activity_at"] -= 1
+    assert t_stalled(t, []) is True
+    # links: the smallest threshold among their sources, over the newest of task and live links
+    links = [it(source="github", age_h=5), it(source="kanban", age_h=5)]
+    assert t_stalled(tk(age_h=30), links, {"github": 4}) is True
+    assert t_stalled(tk(age_h=30), links, {"github": 6}) is False
+    assert t_stalled(tk(age_h=1), links, {"github": 4}) is False
+    # an ignored link neither moves the task nor sets the threshold
+    assert t_stalled(tk(age_h=5), [it(source="github", age_h=0, filing="ignored")], {"github": 4}) is False
+    assert t_stalled(tk(age_h=5), [it(source="github", age_h=5, filing="ignored")], {"github": 4}) is False
+
+
+def test_done_and_canceled_tasks_never_stalled():
+    assert t_stalled(tk(age_h=100), [it("done", age_h=100)]) is False
+    assert t_stalled(tk("canceled", age_h=100), []) is False
+    assert t_stalled(tk("todo", age_h=100), [it("todo", age_h=100)]) is True

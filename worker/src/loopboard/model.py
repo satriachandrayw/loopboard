@@ -1,4 +1,5 @@
 """Shared constants and timestamp parsing."""
+import re
 from datetime import datetime, timezone
 
 CATEGORIES = ("backlog", "todo", "in_progress", "blocked", "review", "done", "canceled")
@@ -10,6 +11,11 @@ DAY = 86400
 DONE_HIDE_SECONDS = 7 * DAY
 REVIEW_WARN_AT = 3
 STALL_DEFAULT_HOURS = 24.0
+TASK_TYPES = ("task", "bug")
+TASK_STATUSES = ("todo", "in_progress", "review", "done", "canceled")
+PRIORITIES = ("high", "medium", "low")
+TASK_KEY = r"^[A-Z][A-Z0-9]{1,9}-[0-9]+$"
+EPIC_KEY = r"^[A-Z][A-Z0-9]{1,9}-E[0-9]+$"
 
 
 class ValidationError(ValueError):
@@ -59,6 +65,7 @@ class ItemIn(BaseModel):
     next_step: str | None = Field(default=None, max_length=200)
     project_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}$")
     epic_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}-E[0-9]+$")
+    task_key: str | None = Field(default=None, pattern=TASK_KEY)
     last_activity_at: str
     merged_at: str | None = None
     live_at: str | None = None
@@ -156,6 +163,76 @@ class FilingIn(BaseModel):
     filing: Literal["epic", "standalone", "ignored"]
     epic_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}-E[0-9]+$")
     project_key: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9]{1,9}$")
+
+
+_Refs = list[str]
+
+
+def _refs(v):
+    if v is None:
+        return v
+    out = []
+    for r in v:
+        r = r.strip() if isinstance(r, str) else r
+        if not isinstance(r, str) or not re.fullmatch(TASK_KEY, r):
+            raise ValueError("refs look like ABC-123")
+        if r not in out:
+            out.append(r)
+    return out
+
+
+class TaskIn(BaseModel):
+    """A new task. Strings are stripped first, so a blank field fails its min_length (422)."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    summary: str = Field(min_length=1, max_length=300)
+    description: str = Field(min_length=1, max_length=2000)
+    done_when: str = Field(min_length=1, max_length=300)
+    owner: str = Field(min_length=1, max_length=100)
+    waiting_on: str = Field(pattern=_WAITING)
+    type: Literal[TASK_TYPES] = "task"  # type: ignore[valid-type]
+    priority: Literal[PRIORITIES] = "medium"  # type: ignore[valid-type]
+    epic_key: str | None = Field(default=None, pattern=EPIC_KEY)
+    refs: _Refs = Field(default_factory=list, max_length=10)
+    item_id: int | None = None
+
+    _refs = field_validator("refs")(_refs)
+
+
+class TaskPatch(BaseModel):
+    """Every field optional; `epic_key: null` moves the task to No epic. Explicit nulls on the
+    required text fields are refused in writes.patch_task."""
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    summary: str | None = Field(default=None, min_length=1, max_length=300)
+    description: str | None = Field(default=None, min_length=1, max_length=2000)
+    done_when: str | None = Field(default=None, min_length=1, max_length=300)
+    owner: str | None = Field(default=None, min_length=1, max_length=100)
+    waiting_on: str | None = Field(default=None, pattern=_WAITING)
+    type: Literal[TASK_TYPES] | None = None  # type: ignore[valid-type]
+    priority: Literal[PRIORITIES] | None = None  # type: ignore[valid-type]
+    epic_key: str | None = Field(default=None, pattern=EPIC_KEY)
+    refs: _Refs | None = Field(default=None, max_length=10)
+
+    _refs = field_validator("refs")(_refs)
+
+
+class TaskStatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal[TASK_STATUSES]  # type: ignore[valid-type]
+
+
+class LinkIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_key: str = Field(pattern=TASK_KEY)
+
+
+class MergeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    into: str = Field(pattern=TASK_KEY)
 
 
 class DeployedIn(BaseModel):

@@ -1,7 +1,7 @@
 """Recompute and persist an epic's derived column (D1: update + event in one batch)."""
 import json
 
-from .derive import derive_epic
+from .derive import derive_epic, item_tasks
 
 IN_CHUNK = 99  # D1 allows 100 bound parameters per statement
 
@@ -34,7 +34,7 @@ async def recompute_epics(repo, epic_ids, *, actor: str, via: str, now: int) -> 
         epic = epics.get(eid)
         if epic is None:
             continue
-        new = derive_epic(epic, by_epic[eid], now).board_column
+        new = derive_epic(epic, item_tasks(by_epic[eid]), now).board_column
         old = epic["board_column"]
         out[eid] = new
         if new == old:

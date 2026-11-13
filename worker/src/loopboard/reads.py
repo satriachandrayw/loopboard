@@ -1,7 +1,7 @@
 """Read API logic: board, needs-you, stalled, unfiled, epic detail, projects."""
 import json
 
-from .derive import derive_epic, effective_category, open_items
+from .derive import derive_epic, item_tasks, effective_category, open_items
 from .model import OPEN_CATEGORIES, REVIEW_WARN_AT
 from .stall import ITEMS_FOR_STALL, epic_stalled, item_stalled, stall_eligible
 
@@ -62,7 +62,7 @@ async def board(repo, *, now, project_key=None, waiting_on=None) -> dict:
     cols = {c: [] for c, _ in COLUMNS}
     for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
-        d = derive_epic(e, items, now)
+        d = derive_epic(e, item_tasks(items), now)
         if d.hidden or d.board_column not in cols:
             continue
         if waiting_on and group_of(e["waiting_on"]) != waiting_on:
@@ -93,7 +93,7 @@ async def needs_you(repo, *, now, project_key=None) -> list[dict]:
     rows = []
     for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
-        d = derive_epic(e, items, now)
+        d = derive_epic(e, item_tasks(items), now)
         if d.hidden or d.board_column in ("done", "canceled"):
             continue
         reasons = []
@@ -138,7 +138,7 @@ async def stalled(repo, *, now, waiting_on=None, project_key=None) -> list[dict]
 
     for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
-        d = derive_epic(e, items, now)
+        d = derive_epic(e, item_tasks(items), now)
         if epic_stalled(e, items, d, now, th):
             add("epic", e["id"], e["key"], e["title"], e["waiting_on"], _waiting_since(e, items), {})
     for i in await repo.query(ITEMS_FOR_STALL):
@@ -177,7 +177,7 @@ async def epic_detail(repo, *, key, now):
     th = await thresholds(repo)
     items = await repo.query("select * from items where epic_id = ? and filing = 'epic' order by id",
                              (e["id"],))
-    d = derive_epic(e, items, now)
+    d = derive_epic(e, item_tasks(items), now)
     card = _card(e, items, d, now, th)
     card.update({k: e[k] for k in ("next_step", "home_url", "spec_url", "plan_url")})
     tasks = {g: [] for g in TASK_GROUPS}
