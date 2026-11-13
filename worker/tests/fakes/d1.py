@@ -81,6 +81,13 @@ class FakeD1:
         self._conn.execute("commit")
         return out
 
-    def apply_migrations(self):
+    def apply_migrations(self, upto: str | None = None):
+        """Apply migrations in name order; with `upto`, only files whose name sorts <= it, and only
+        those not applied yet (so a test can apply 0001, seed rows, then apply 0002)."""
+        done = getattr(self, "_applied", set())
         for f in sorted(MIGRATIONS.glob("*.sql")):
+            if (upto is not None and f.name > upto) or f.name in done:
+                continue
             self._conn.executescript(f.read_text())
+            done.add(f.name)
+        self._applied = done
