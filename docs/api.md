@@ -82,11 +82,12 @@ stalled tasks (`kind: "task"`, with `epic_key`; tasks of canceled epics are left
 stalls when it is open and neither it nor a live link moved for longer than the smallest stall
 threshold of its links' sources. A task with no live links (planned work nobody has started) uses
 the threshold of the `planned` source instead, 168 h (7 days) unless set with
-`PUT /api/sources/planned`. An open epic stalls when its newest open item moved longer ago than
-the smallest stall threshold among the open items' sources. An epic with no open items whose only
-open work is planned tasks (status todo, in progress or review) uses the `planned` threshold over
-the newest of its own and those tasks' activity. An epic with neither uses 24 h over its own
-activity. 200.
+`PUT /api/sources/planned`. An open epic (todo, in progress or review) stalls on its open items:
+the smallest stall threshold among their sources, over the newest open item. With no open items
+but open tasks (status todo, in progress or review), it uses the `planned` threshold (168 h unless
+set with `PUT /api/sources/planned`) over the newest of the epic's and those tasks' activity; done
+and canceled tasks don't count. Otherwise it uses 24 h over its own activity. An epic row's
+`waiting_since` (and `stalled_for_hours`) is measured from the same point. 200.
 
 ### GET /api/unfiled
 

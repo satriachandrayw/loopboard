@@ -4,7 +4,7 @@ import json
 from .derive import derive_epic, derive_task, effective_category, live_links, open_items
 from .model import DONE_HIDE_SECONDS, REVIEW_WARN_AT
 from .recompute import _qs, chunks
-from .stall import epic_stalled, item_stalled, task_stalled
+from .stall import OPEN_TASK_STATUSES, epic_stalled, item_stalled, task_stalled
 
 COLUMNS = (("backlog", "Backlog"), ("todo", "Todo"), ("in_progress", "In progress"),
            ("review", "Review"), ("done", "Done"))
@@ -86,8 +86,14 @@ def _derive(row, now):
     return derive_epic(row["epic"], [t["derived"] for t in row["tasks"]], now)
 
 
-def _waiting_since(epic, items) -> int:
-    return max([epic["last_activity_at"]] + [i["last_activity_at"] for i in open_items(items)])
+def _waiting_since(epic, items, tasks) -> int:
+    """The newest open item; with none, the newest of the epic and its open tasks (load_tasks rows),
+    the same clock epic_stalled uses."""
+    op = open_items(items)
+    if op:
+        return max([epic["last_activity_at"]] + [i["last_activity_at"] for i in op])
+    return max([epic["last_activity_at"]] + [t["task"]["last_activity_at"] for t in tasks
+                                             if t["derived"].status in OPEN_TASK_STATUSES])
 
 
 def _card(e, items, tasks, d, now, th) -> dict:
@@ -97,7 +103,7 @@ def _card(e, items, tasks, d, now, th) -> dict:
         "column": d.board_column, "stage": e["stage"],
         "progress": {"done": d.done, "total": d.total},
         "owner": e["owner"], "waiting_on": e["waiting_on"],
-        "waiting_since": _waiting_since(e, items),
+        "waiting_since": _waiting_since(e, items, tasks),
         "stalled": epic_stalled(e, items, tasks, d, now, th),
         "flags": d.flags, "review_owner": d.review_owner,
     }
@@ -212,7 +218,8 @@ async def needs_you(repo, *, now, project_key=None) -> list[dict]:
             reasons.append("review · you")
         if reasons:
             rows.append({"kind": "epic", "id": e["id"], "ref": e["key"], "title": e["title"],
-                         "waiting_on": e["waiting_on"], "waiting_since": _waiting_since(e, items),
+                         "waiting_on": e["waiting_on"],
+                         "waiting_since": _waiting_since(e, items, row["tasks"]),
                          "reasons": reasons})
     th = await thresholds(repo)
     for row in await _shown_tasks(repo, project_key, now):
@@ -256,7 +263,8 @@ async def stalled(repo, *, now, waiting_on=None, project_key=None) -> list[dict]
             canceled.add(e["id"])
         d = _derive(row, now)
         if epic_stalled(e, items, row["tasks"], d, now, th):
-            add("epic", e["id"], e["key"], e["title"], e["waiting_on"], _waiting_since(e, items), {})
+            add("epic", e["id"], e["key"], e["title"], e["waiting_on"],
+                _waiting_since(e, items, row["tasks"]), {})
     pid = await _project_id(repo, project_key)
     for row in await load_tasks(repo, project_id=pid) if pid is not None else await load_tasks(repo):
         t = row["task"]

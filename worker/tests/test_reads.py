@@ -517,3 +517,26 @@ async def test_epic_with_only_a_planned_task_stalls_after_7_days(repo):
     assert epics(await reads.stalled(repo, now=later)) == ["DEMO-E1"]
     assert col(await reads.board(repo, now=later), "todo")["cards"][0]["stalled"] is True
     assert (await reads.epic_detail(repo, key="DEMO-E1", now=later))["epic"]["stalled"] is True
+
+
+async def test_epic_with_only_a_planned_task_waits_since_the_task(repo):
+    # the epic was last active 200 h ago, its only open work (a planned task) 169 h ago
+    e = await mk_epic(repo, last=NOW - 200 * H)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - 169 * H)
+    rows = [r for r in await reads.stalled(repo, now=NOW) if r["kind"] == "epic"]
+    assert [(r["ref"], r["stalled_for_hours"]) for r in rows] == [("DEMO-E1", 169.0)]
+    assert rows[0]["waiting_since"] == NOW - 169 * H
+    card = col(await reads.board(repo, now=NOW), "todo")["cards"][0]
+    assert card["waiting_since"] == NOW - 169 * H
+    # a newer done or canceled task doesn't count
+    await mk_task(repo, epic_id=e, summary="dropped", status="canceled", last=NOW - H)
+    card = col(await reads.board(repo, now=NOW), "todo")["cards"][0]
+    assert card["waiting_since"] == NOW - 169 * H
+
+
+async def test_epic_waiting_since_with_open_items_ignores_tasks(repo):
+    e = await mk_epic(repo, last=NOW - 200 * H)
+    await mk_task(repo, epic_id=e, summary="planned", last=NOW - H)
+    await mk_item(repo, "x1", epic_id=e, last=NOW - 50 * H)
+    card = col(await reads.board(repo, now=NOW), "in_progress")["cards"][0]
+    assert card["waiting_since"] == NOW - 50 * H
