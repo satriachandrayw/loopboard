@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local stack check for v1a. Exits 0 only when every check passes.
+# Local stack check for v1a and tasks. Exits 0 only when every check passes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LB_TMP="${LB_TMP_DIR:-/tmp/lb-uv-$(id -u)}"
@@ -177,16 +177,53 @@ r="$(ing_post "$(ts_ago 1)" "$NEW_TITLE")"
 r="$(ing_post "$(ts_ago 120)" "Older title must not win")"
 [ "$(printf '%s' "$r" | jget "d['skipped_older']" 2>/dev/null)" = 1 ] \
   && ok "6b ingest older timestamp -> skipped_older == 1" || fail "6b ingest older -> $r"
+# Epic detail lists tasks; each filed item is one task, so find the updated item among their links.
 DETAIL="$(api GET /api/epics/DEMO-E1 | sed '$d')"
 printf '%s' "$DETAIL" >"$TMP/detail.json"
-if python3 - "$TMP/detail.json" "$UPD_ID" "$NEW_TITLE" <<'PY'
+: >"$TMP/links.jsonl"
+for key in $(jget "' '.join(t['key'] for t in d['tasks'])" <"$TMP/detail.json" 2>/dev/null); do
+  api GET "/api/tasks/$key" | sed '$d' | jget "json.dumps(d['links'])" >>"$TMP/links.jsonl" 2>/dev/null
+done
+if python3 - "$TMP/detail.json" "$TMP/links.jsonl" "$UPD_ID" "$NEW_TITLE" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-ts = [t for g in d["tasks"].values() for t in g if t["external_id"] == sys.argv[2]]
-assert ts and ts[0]["title"] == sys.argv[3], ts
+links = [i for line in open(sys.argv[2]) for i in json.loads(line)]
+ts = [i for i in links if i["external_id"] == sys.argv[3]]
+assert ts and ts[0]["title"] == sys.argv[4], ts
 assert any(e["kind"] == "item.updated" for e in d["events"]), "no item.updated event"
 PY
 then ok "6b epic detail shows new title and an item.updated event"; else fail "6b epic detail after update"; fi
+set -e
+
+# 8: tasks. Create a task under DEMO-E1, see it in the DEMO-E1 lane, link a new unfiled item to it.
+set +e
+r="$(api POST /api/projects/DEMO/tasks '{"summary":"Acceptance task","description":"Checks the task API.","done_when":"The linked card is done.","owner":"owner","waiting_on":"agent:coder","epic_key":"DEMO-E1"}')"
+[ "${r##*$'\n'}" = 201 ] && ok "8 create task under DEMO-E1 -> 201" || fail "8 create task -> ${r##*$'\n'}"
+TASK="$(printf '%s' "${r%$'\n'*}" | jget "d['key']" 2>/dev/null || echo "")"
+case "$TASK" in DEMO-[0-9]*) ok "8 task key $TASK";; *) fail "8 task key is '$TASK'";; esac
+api GET /api/projects/DEMO/tasks | sed '$d' >"$TMP/tasks.json"
+if python3 - "$TMP/tasks.json" "$TASK" <<'PY'
+import json, sys
+b = json.load(open(sys.argv[1]))
+lane = [l for l in b["lanes"] if l["epic"] and l["epic"]["key"] == "DEMO-E1"]
+assert lane, [l["epic"] for l in b["lanes"]]
+assert any(t["key"] == sys.argv[2] for col in lane[0]["tasks"].values() for t in col), lane[0]
+PY
+then ok "8 GET /api/projects/DEMO/tasks shows $TASK in the DEMO-E1 lane"; else fail "8 tasks board lane"; fi
+EXTRA="$(printf '%s' "$ING_BASE" | python3 -c "import sys,json; d=json.load(sys.stdin); d['external_id']='acceptance-extra'; print(json.dumps(d))")"
+ING_BASE="$EXTRA" ing_post "$(ts_ago 1)" "Acceptance extra card" >"$TMP/extra.json"
+EXTRA_ID="$(api GET /api/unfiled | sed '$d' | jget "[i['id'] for i in d if i['external_id']=='acceptance-extra'][0]" 2>/dev/null || echo "")"
+[ -n "$EXTRA_ID" ] && ok "8 new item acceptance-extra is unfiled" || fail "8 new item not unfiled: $(cat "$TMP/extra.json")"
+r="$(api POST "/api/items/$EXTRA_ID/link" "{\"task_key\":\"$TASK\"}")"
+[ "${r##*$'\n'}" = 200 ] && ok "8 link item $EXTRA_ID to $TASK -> 200" || fail "8 link item -> ${r##*$'\n'}"
+api GET "/api/tasks/$TASK" | sed '$d' >"$TMP/task.json"
+if python3 - "$TMP/task.json" "$EXTRA_ID" <<'PY'
+import json, sys
+t = json.load(open(sys.argv[1]))
+assert [i["id"] for i in t["links"]] == [int(sys.argv[2])], t["links"]
+assert t["epic_key"] == "DEMO-E1" and t["reason"], t
+PY
+then ok "8 GET /api/tasks/$TASK shows the link"; else fail "8 task detail after link"; fi
 set -e
 
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/board")"

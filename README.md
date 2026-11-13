@@ -10,14 +10,13 @@ Loopboard groups work from agent tools (Hermes Kanban cards, GitHub pull request
 
 **Status:** pre-alpha, v1a under construction. See [`docs/design.md`](docs/design.md) and the [v1a plan](docs/plans/2026-11-12-loopboard-v1a.md).
 
-## Filing work to an epic
+## Tasks
 
-Synced cards and pull requests land in **Unfiled**. To file one under an epic, start its title
-with the epic key in brackets, for example a Kanban card or PR titled
-`[DEMO-E5] Add checkout retry`. The next sync files it under `DEMO-E5` and stores the title as
-`Add checkout retry`. The tag only files new or still-unfiled items; a filing made by a person or
-Hermes is never changed by it. An unknown key leaves the item in Unfiled and is counted as
-`unknown_epic` in the sync summary. See [Connectors](docs/connectors.md#filing-by-title-prefix).
+- A task has its own key per project, `DEMO-12`, next to epic keys like `DEMO-E5`; it belongs to at most one epic, and a task without one sits in the **No epic** lane of the Tasks board (Board → Epics | Tasks).
+- Start a Kanban card or PR title with `[DEMO-12]` and the next sync links it to that task; a title tagged only `[DEMO-E5]` gets a new task made for it under that epic. Untagged items land in **Unfiled**, where you link them to a task, make a task from them, or ignore them.
+- A task's **refs** are other keys that mean it (say another tracker's `OPS-8001`): a title carrying a ref as a whole word links too, within the same project only. Tags never move an item a person already filed, and unknown keys never fail a sync.
+- Status follows the links: any linked item running → In progress, any in review → Review, all done (merged PRs once live) → Done. A task without links moves by hand, and an agent's Done waits for a human to confirm it.
+- An epic's column and progress (done tasks / tasks) come from its tasks. See [Connectors](docs/connectors.md#linking-by-title-prefix-and-refs) and the [tasks design](docs/design-tasks.md).
 
 ## Docs
 
