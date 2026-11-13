@@ -49,7 +49,8 @@ async def test_board_card_has_contract_fields(repo):
     await mk_item(repo, "2", e, "done", last=NOW - 5)
     b = await reads.board(repo, now=NOW)
     card = col(b, "in_progress")["cards"][0]
-    assert card == {"id": e, "key": "DEMO-E1", "title": "E", "project_key": "DEMO", "column": "in_progress",
+    assert card == {"id": e, "key": "DEMO-E1", "title": "E", "goal": None, "project_key": "DEMO",
+                    "column": "in_progress",
                     "stage": "build", "progress": {"done": 1, "total": 2}, "owner": None,
                     "waiting_on": "agent:a", "waiting_since": NOW - 10, "stalled": False,
                     "flags": [], "review_owner": None}
@@ -326,3 +327,17 @@ async def test_list_routes_accept_project_param(make_app, client_for):
             assert r.status_code == 200 and r.json() == []
         r = await c.get("/api/needs-you?project=DEMO", headers=bearer(t))
         assert [x["ref"] for x in r.json()] == ["DEMO-E1"]
+
+
+async def test_board_card_carries_goal(make_app, client_for):
+    from tests.test_writes import mk_epic as post_epic, mk_project, req, setup
+
+    app, repo, h = await setup(make_app)
+    await mk_project(client_for, app, h)
+    assert (await post_epic(client_for, app, h, title="With")).status_code == 201
+    await mk_epic(repo, key="DEMO-E2", title="Without", manual="backlog", board="backlog", waiting_on="agent:a")
+    rh = bearer(await add_token(repo, name="reader", scopes="read"))
+    b = (await req(client_for, app, rh, "GET", "/api/board")).json()
+    cards = {c["title"]: c for column in b["columns"] for c in column["cards"]}
+    assert cards["With"]["goal"] == "Demo goal."
+    assert "goal" in cards["Without"] and cards["Without"]["goal"] is None

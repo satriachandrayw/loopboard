@@ -46,7 +46,8 @@ def _waiting_since(epic, items) -> int:
 
 def _card(e, items, d, now, th) -> dict:
     return {
-        "id": e["id"], "key": e["key"], "title": e["title"], "project_key": e["project_key"],
+        "id": e["id"], "key": e["key"], "title": e["title"], "goal": e["goal"],
+        "project_key": e["project_key"],
         "column": d.board_column, "stage": e["stage"],
         "progress": {"done": d.done, "total": d.total},
         "owner": e["owner"], "waiting_on": e["waiting_on"],
@@ -178,7 +179,7 @@ async def epic_detail(repo, *, key, now):
                              (e["id"],))
     d = derive_epic(e, items, now)
     card = _card(e, items, d, now, th)
-    card.update({k: e[k] for k in ("goal", "next_step", "home_url", "spec_url", "plan_url")})
+    card.update({k: e[k] for k in ("next_step", "home_url", "spec_url", "plan_url")})
     tasks = {g: [] for g in TASK_GROUPS}
     for i in items:
         if i["status_category"] == "canceled":

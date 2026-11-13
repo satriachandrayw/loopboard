@@ -22,6 +22,7 @@ async def mk_project(client_for, app, h, key="DEMO"):
 
 async def mk_epic(client_for, app, h, title="E", project="DEMO", **kw):
     kw.setdefault("waiting_on", "agent:a")
+    kw.setdefault("goal", "Demo goal.")
     return await req(client_for, app, h, "POST", f"/api/projects/{project}/epics", {"title": title, **kw})
 
 
@@ -382,3 +383,36 @@ async def test_epic_write_responses_match_get_card(make_app, client_for):
         assert set(body) == set(card)
         assert "board_column" not in body and "manual_column" not in body
     assert patched.json()["stage"] == "spec" and done.json()["column"] == "done"
+
+
+async def test_create_epic_blank_goal_is_422(make_app, client_for):
+    app, repo, h = await setup(make_app)
+    await mk_project(client_for, app, h)
+    for g in ("", "   "):
+        assert (await mk_epic(client_for, app, h, goal=g)).status_code == 422
+    r = await req(client_for, app, h, "POST", "/api/projects/DEMO/epics", {"title": "E", "waiting_on": "agent:a"})
+    assert r.status_code == 422
+    r = await req(client_for, app, h, "POST", "/api/projects/DEMO/epics",
+                  {"title": "E", "waiting_on": "agent:a", "goal": None})
+    assert r.status_code == 422
+    assert await epic(repo) is None
+
+
+async def test_create_epic_goal_is_stored_stripped(make_app, client_for):
+    app, repo, h = await setup(make_app)
+    await mk_project(client_for, app, h)
+    r = await mk_epic(client_for, app, h, goal="  Ship it  ")
+    assert r.status_code == 201 and r.json()["goal"] == "Ship it"
+    assert (await epic(repo))["goal"] == "Ship it"
+
+
+async def test_patch_goal_cannot_be_blanked_or_nulled(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    for g in (None, "", "  "):
+        r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"goal": g})
+        assert r.status_code == 422
+    assert (await epic(repo))["goal"] == "Demo goal."
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"goal": " New "})
+    assert r.status_code == 200 and r.json()["goal"] == "New"
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"title": "Renamed"})
+    assert r.status_code == 200 and r.json()["goal"] == "New"

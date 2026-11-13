@@ -126,7 +126,7 @@ fi
 # Step 6 runs without set -e so any failure prints FAIL instead of exiting silently.
 set +e
 EXPECTED="$ROOT/connectors/tests/fixtures/kanban/expected-board.json"
-r="$(api POST /api/projects/DEMO/epics '{"title":"Acceptance epic","waiting_on":"human:owner"}')"
+r="$(api POST /api/projects/DEMO/epics '{"title":"Acceptance epic","goal":"Acceptance goal.","waiting_on":"human:owner"}')"
 [ "${r##*$'\n'}" = 201 ] || fail "6 create epic -> ${r##*$'\n'}"
 EPIC="$(printf '%s' "${r%$'\n'*}" | jget "d['key']" 2>/dev/null || echo "")"
 if [ "$EPIC" != "DEMO-E1" ]; then fail "6 epic key is '$EPIC', expected DEMO-E1"; fi

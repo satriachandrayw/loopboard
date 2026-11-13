@@ -55,9 +55,9 @@ List of `{id, key, name, created_at}`. 200.
 
 Query: `project` (key), `waiting_on` (`agent|human|source`). Response 200:
 `{"columns": [{column, label, count, warn, cards: [...]}]}` for backlog, todo, in_progress,
-review, done. A card has `id, key, title, project_key, column, stage, progress, owner,
+review, done. A card has `id, key, title, goal, project_key, column, stage, progress, owner,
 waiting_on, waiting_since, stalled, flags, review_owner`. Canceled epics and Done epics older
-than 7 days are hidden.
+than 7 days are hidden. `goal` (the description) is null on epics created before it was required.
 
 ### GET /api/needs-you
 
@@ -79,7 +79,7 @@ live review item counts as `done`), `merged_at, live_at`. 200.
 
 ### GET /api/epics/{key}
 
-Epic card (its `column` is the derived board column, the only column field) plus `goal`, links, `tasks` grouped by column, `relations` and the newest 50 `events`.
+Epic card (its `column` is the derived board column, the only column field) plus links, `tasks` grouped by column, `relations` and the newest 50 `events`.
 200, or 404 if the epic does not exist.
 
 ## Writes (scope `write`)
@@ -94,8 +94,10 @@ key exists.
 
 ### POST /api/projects/{project_key}/epics
 
-Body: `{"title", "goal"?, "stage"? (idea|spec|plan|build|review|ship), "owner"?, "next_step"?,
+Body: `{"title", "goal", "stage"? (idea|spec|plan|build|review|ship), "owner"?, "next_step"?,
 "waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`. URL fields accept only `http://` or `https://` (else 422).
+`goal` is the epic's description (shown as "Description" in the UI): required, at most 2000
+characters, stored stripped; missing, null, empty or whitespace-only is 422.
 `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`) is required unless
 `manual_column` is `canceled` (422 otherwise). Epic keys are `<PROJECT>-E<n>`, numbered per
 project from 1. 201, 404 unknown project.
@@ -103,7 +105,8 @@ project from 1. 201, 404 unknown project.
 ### PATCH /api/epics/{key}
 
 Body: any of the epic fields above; null is rejected for fields that cannot be null and an empty
-body is 422. `waiting_on` cannot be set to null, and a canceled epic cannot be reopened without
+body is 422. `goal` cannot be set to null, empty or whitespace-only (422); a given `goal` is stored stripped.
+`waiting_on` cannot be set to null, and a canceled epic cannot be reopened without
 one, unless the epic stays canceled (422). 200, 404 unknown epic. Agents never set a column other than backlog, todo or canceled.
 
 ### POST /api/epics/{key}/confirm-done

@@ -37,3 +37,19 @@ def test_item_url_must_be_http_or_https():
     for bad in ("data:text/html,x", "javascript:alert(1)", "example.com"):
         with pytest.raises(PydanticError):
             ItemIn(**base, url=bad)
+
+
+def test_epic_goal_required_and_stripped():
+    from loopboard.model import EpicIn, EpicPatch
+
+    assert EpicIn(title="T", waiting_on="agent:a", goal="  Ship it  ").goal == "Ship it"
+    for bad in (None, "", "   ", "x" * 2001):
+        with pytest.raises(ValueError):
+            EpicIn(title="T", waiting_on="agent:a", goal=bad)
+    with pytest.raises(ValueError):
+        EpicIn(title="T", waiting_on="agent:a")
+    assert EpicPatch(goal=" New ").goal == "New"
+    assert "goal" not in EpicPatch().model_fields_set
+    for bad in ("", "   "):
+        with pytest.raises(ValueError):
+            EpicPatch(goal=bad)

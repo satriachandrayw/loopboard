@@ -10,7 +10,7 @@ EVENT_BY_SQL = ("insert into events(at, actor, via, subject_type, subject_id, ki
                 "select ?, ?, 'api', ?, id, ?, ? from {table} where {where}")
 EPIC_FIELDS = ("title", "goal", "stage", "owner", "next_step", "waiting_on", "home_url", "spec_url",
                "plan_url", "manual_column")
-NOT_NULL = ("title", "stage", "manual_column")
+NOT_NULL = ("title", "goal", "stage", "manual_column")
 
 
 class NotFound(LookupError):

@@ -90,6 +90,17 @@ class IngestIn(BaseModel):
 _WAITING = r"^(agent|human|source):[A-Za-z0-9._-]{1,64}$"
 
 
+def _description(v):
+    """Epic goal (shown as "Description"): stripped, never blank. None passes through for PATCH, where
+    writes.NOT_NULL rejects an explicit null; EpicIn's `str` type already refuses None."""
+    if v is None:
+        return v
+    v = v.strip()
+    if not v:
+        raise ValueError("goal cannot be blank")
+    return v
+
+
 class ProjectIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,7 +112,7 @@ class EpicIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=200)
-    goal: str | None = Field(default=None, max_length=2000)
+    goal: str = Field(max_length=2000)
     stage: Literal[STAGES] = "idea"  # type: ignore[valid-type]
     owner: str | None = Field(default=None, max_length=100)
     next_step: str | None = Field(default=None, max_length=200)
@@ -112,6 +123,7 @@ class EpicIn(BaseModel):
     manual_column: Literal[EPIC_MANUAL_COLUMNS] = "backlog"  # type: ignore[valid-type]
 
     _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
+    _goal = field_validator("goal")(_description)
 
     @model_validator(mode="after")
     def _waiting(self):
@@ -135,6 +147,7 @@ class EpicPatch(BaseModel):
     manual_column: Literal[EPIC_MANUAL_COLUMNS] | None = None  # type: ignore[valid-type]
 
     _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
+    _goal = field_validator("goal")(_description)
 
 
 class FilingIn(BaseModel):
