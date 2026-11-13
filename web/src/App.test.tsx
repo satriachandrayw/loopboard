@@ -72,3 +72,23 @@ it('test_no_free_text_project_input_on_any_screen', async () => {
     r.unmount()
   }
 })
+
+it('test_view_switch_routes_between_board_and_tasks', async () => {
+  localStorage.setItem('loopboard.project', 'DEMO')
+  stubApi({ ...routes, '/api/projects/DEMO/tasks': { project: 'DEMO', columns: ['todo', 'in_progress', 'review', 'done'],
+    lanes: [{ epic: null, tasks: { todo: [], in_progress: [], review: [], done: [] } }] } })
+  render(<App />)
+  const sw = await screen.findByRole('group', { name: 'View' })
+  const [epics, tasks] = within(sw).getAllByRole('link')
+  expect([epics.textContent, epics.getAttribute('href'), epics.getAttribute('aria-current')]).toEqual(['Epics', '#/board', 'page'])
+  expect(tasks.getAttribute('href')).toBe('#/tasks')
+  window.location.hash = '#/tasks'
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  await waitFor(() => expect(screen.getByText('No epic')).toBeTruthy())
+  const sw2 = screen.getByRole('group', { name: 'View' })
+  expect(within(sw2).getByRole('link', { name: 'Tasks' }).getAttribute('aria-current')).toBe('page')
+  // Board stays highlighted in the main nav
+  const nav = screen.getByRole('navigation', { name: 'Main' })
+  expect(within(nav).getByRole('link', { name: 'Board' }).getAttribute('aria-current')).toBe('page')
+  localStorage.clear()
+})

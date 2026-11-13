@@ -5,6 +5,7 @@ import Column from '../components/Column'
 import NewEpicForm from '../components/NewEpicForm'
 import ProjectChips from '../components/ProjectChips'
 import TokenPrompt from '../components/TokenPrompt'
+import ViewSwitch from '../components/ViewSwitch'
 import { announceChange, epicHref, isOpenItem, nowSeconds } from '../format'
 import { useProject, useProjects, withProject } from '../project'
 import { useNarrow } from '../useNarrow'
@@ -98,6 +99,7 @@ export default function Board() {
     <main className="screen board">
       {narrow && <div className="top"><h1 className="t">Board</h1></div>}
       <div className="filters">
+        <ViewSwitch view="epics" />
         <ProjectChips projects={projects} />
         <label className="chip select">
           <span>Waiting on:</span>

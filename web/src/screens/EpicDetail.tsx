@@ -1,6 +1,6 @@
 import { apiPost, AuthError } from '../api'
 import ActivityLog from '../components/ActivityLog'
-import TaskCard from '../components/TaskCard'
+import LinkRow from '../components/LinkRow'
 import TokenPrompt from '../components/TokenPrompt'
 import { FLAG_TEXT, RED_FLAGS, waitKind } from '../format'
 import { useApi } from '../useApi'
@@ -125,7 +125,7 @@ export default function EpicDetail({ epicKey }: { epicKey: string }) {
                 <div className="card tasks">
                   {(data.tasks[g] ?? []).length === 0 && <p className="s none">None</p>}
                   {(data.tasks[g] ?? []).map((t) => (
-                    <TaskCard key={t.id} task={t} />
+                    <LinkRow key={t.id} task={t} />
                   ))}
                 </div>
               </section>

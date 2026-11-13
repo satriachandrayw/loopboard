@@ -90,6 +90,33 @@ ul, ol { list-style: none; margin: 0; padding: 0; }
 .flag.flag-red { border-color: var(--red-line); color: var(--red); }
 .flag.flag-review_owner { border-color: var(--line); color: var(--mute); }
 
+/* Epics | Tasks switch */
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-right: 10px; flex: 0 0 auto; }
+.seg a { font-size: 12px; padding: 3px 12px; color: var(--mute); }
+.seg a.on { background: #2a3050; color: var(--text); }
+.seg a:hover { text-decoration: none; }
+
+/* Tasks board: column header row once, then one swimlane per epic. */
+.colhead { display: flex; gap: 10px; padding: 10px 12px 4px; }
+.colhead div { flex: 1; color: var(--mute); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 0 8px; }
+.lane { border-top: 1px solid var(--line); }
+.laneh { display: flex; gap: 8px; align-items: center; padding: 8px 16px; background: #13161e; font-size: 12px; }
+.laneh .fold { display: inline-flex; gap: 8px; align-items: center; background: transparent; border: 0; padding: 0; cursor: pointer; color: var(--text); }
+.laneh .ttl { font-weight: 600; }
+.laneh .m { color: var(--mute); font-size: 11px; }
+.no-epic .laneh .ttl { color: var(--mute); }
+.laneh .pbx { width: 90px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.laneh .pbx i { display: block; height: 100%; background: var(--green); }
+.lanebody { display: flex; gap: 10px; padding: 8px 12px 12px; }
+.lanebody .column { min-height: 0; padding: 6px; }
+.empty-cell { color: #4d5366; font-size: 11px; text-align: center; padding: 10px 0; }
+.typ { font-size: 10px; padding: 1px 5px; border-radius: 5px; background: #1d2a24; color: #7fd6a8; }
+.typ.bug { background: #2d1c1c; color: #f08b8b; }
+.task-card .links { font-size: 10.5px; color: var(--mute); margin-top: 2px; }
+.task-card .ti { margin-bottom: 2px; }
+.pcol { padding: 10px; }
+.plane { font-size: 11.5px; font-weight: 600; margin: 6px 2px; color: #c6cbe0; }
+
 /* Menus (Move, File to epic, Standalone) */
 .menu { position: relative; display: inline-block; }
 .foot .menu { margin: 5px 0 0 auto; }

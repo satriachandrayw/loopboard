@@ -60,3 +60,24 @@ export const COLUMN_RULES: Record<string, string> = {
   review: 'Handed over to review, merge and deploy.',
   done: 'Live, not just merged. Hides after 7 days.',
 }
+
+export const taskHref = (key: string) => `#/task/${encodeURIComponent(key)}`
+
+export const TASK_COLUMNS: [string, string][] = [
+  ['todo', 'Todo'], ['in_progress', 'In progress'], ['review', 'Review'], ['done', 'Done'],
+]
+
+const LINK_WORDS: Record<string, [string, string, string]> = {
+  kanban: ['🗂', 'card', 'cards'],
+  github: ['⑂', 'PR', 'PRs'],
+}
+
+// `🗂 1 card done · ⑂ 2 PRs merged`; other sources by name.
+export function linksText(summary: Record<string, { count: number; state: string }>): string {
+  return Object.entries(summary)
+    .map(([src, { count, state }]) => {
+      const w = LINK_WORDS[src]
+      return w ? `${w[0]} ${count} ${count === 1 ? w[1] : w[2]} ${state}` : `${count} ${src} ${state}`
+    })
+    .join(' · ')
+}

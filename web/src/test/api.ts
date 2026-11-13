@@ -51,3 +51,16 @@ export function board(cards: Record<string, unknown[]> = {}, reviewCount?: numbe
     }),
   }
 }
+
+export const taskView = (n: number, status: string, extra: Record<string, unknown> = {}) => ({
+  id: n, key: `DEMO-${n}`, type: 'task', summary: `Task ${n}`, description: 'What it is.', done_when: 'It is live.',
+  project_key: 'DEMO', epic_key: 'DEMO-E1', status, flags: [], reason: 'Moved by hand', priority: 'medium',
+  owner: 'coder', waiting_on: 'agent:coder', waiting_since: 1, stalled: false, refs: [], reporter: 'owner',
+  links_summary: {}, last_activity_at: 1, ...extra,
+})
+
+export const tasksBoard = (lanes: { epic: { key: string; title: string; progress: { done: number; total: number } } | null;
+  tasks: Record<string, unknown[]> }[]) => ({
+  project: 'DEMO', columns: ['todo', 'in_progress', 'review', 'done'],
+  lanes: lanes.map((l) => ({ epic: l.epic, tasks: { todo: [], in_progress: [], review: [], done: [], ...l.tasks } })),
+})

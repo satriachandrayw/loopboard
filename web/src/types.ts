@@ -31,10 +31,11 @@ export interface BoardResponse {
 }
 
 export interface NeedsYouRow {
-  kind: 'epic' | 'item'
+  kind: 'epic' | 'item' | 'task'
   id: number
   ref: string
   title: string
+  epic_key?: string | null
   url?: string | null
   waiting_on: string | null
   waiting_since: number | null
@@ -42,10 +43,11 @@ export interface NeedsYouRow {
 }
 
 export interface StalledRow {
-  kind: 'epic' | 'item'
+  kind: 'epic' | 'item' | 'task'
   id: number
   ref: string
   title: string
+  epic_key?: string | null
   url?: string | null
   waiting_on: string | null
   waiting_group: WaitingGroup
@@ -115,5 +117,73 @@ export interface EpicDetailResponse {
   }
   tasks: Record<string, Task[]>
   relations?: Relation[]
+  events: EpicEvent[]
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done' | 'canceled'
+
+export interface LinkSummary {
+  count: number
+  state: string
+}
+
+// A task as the Tasks board and epic detail show it.
+export interface TaskView {
+  id: number
+  key: string
+  type: 'task' | 'bug'
+  summary: string
+  description: string
+  done_when: string
+  project_key: string
+  epic_key: string | null
+  status: TaskStatus
+  flags: string[]
+  reason: string
+  priority: 'high' | 'medium' | 'low'
+  owner: string
+  waiting_on: string | null
+  waiting_since: number | null
+  stalled: boolean
+  refs: string[]
+  reporter: string
+  links_summary: Record<string, LinkSummary>
+  last_activity_at: number
+}
+
+export interface TaskLane {
+  epic: { key: string; title: string; progress: { done: number; total: number } } | null
+  tasks: Record<string, TaskView[]>
+}
+
+export interface TasksBoardResponse {
+  project: string
+  columns: string[]
+  lanes: TaskLane[]
+}
+
+export interface TaskLink {
+  id: number
+  ref: string
+  source: string
+  external_id: string
+  title: string
+  url: string | null
+  status_category: string
+  category: string
+  owner: string | null
+  waiting_on: string | null
+  last_activity_at: number
+  merged_at: number | null
+  live_at: number | null
+  stalled: boolean
+}
+
+export interface TaskDetailResponse extends TaskView {
+  merged_into: string | null
+  done_confirmed_at: number | null
+  created_at: number
+  updated_at: number
+  links: TaskLink[]
   events: EpicEvent[]
 }
