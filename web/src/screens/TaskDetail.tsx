@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { apiPost, ApiError, AuthError } from '../api'
 import ActivityLog from '../components/ActivityLog'
+import AnswerBox from '../components/AnswerBox'
 import Menu from '../components/Menu'
 import TokenPrompt from '../components/TokenPrompt'
 import { announceChange, epicHref, FLAG_TEXT, RED_FLAGS, STATUS_TEXT, TASK_COLUMNS, waitKind, who } from '../format'
@@ -62,6 +63,11 @@ export default function TaskDetail({ taskKey }: { taskKey: string }) {
   const t = data
   const linked = t ? Object.keys(t.links_summary ?? {}).length > 0 : false
   const kind = waitKind(t?.waiting_on)
+  const awaiting = !!t && t.status !== 'canceled' && t.flags.includes('awaiting_confirmation')
+  const confirmBtn = (
+    <button type="button" className="btn" disabled={busy}
+      onClick={() => void act('confirm-done', undefined, 'Confirm failed.')}>Confirm done</button>
+  )
   return (
     <main className="screen list task-detail">
       {error && <p className="error" role="alert">{error}</p>}
@@ -83,15 +89,31 @@ export default function TaskDetail({ taskKey }: { taskKey: string }) {
             </p>
           </header>
           <div className="body">
-            <h2 className="sec">Description</h2>
-            <div className="card box">
-              <p className="goal">{t.description}</p>
-              <p className="dw">{`Done when: ${t.done_when}`}</p>
-              {t.refs.length > 0 && <p className="dw">{`Refs: ${t.refs.join(', ')}`}</p>}
-            </div>
-            <h2 className="sec">Links (status comes from these)</h2>
-            <div className="card box">
-              {t.links.length ? <LinkRows links={t.links} /> : <p className="s none">No links yet. Status moves by hand.</p>}
+            <div className="tcols">
+              <div>
+                {t.ask && <AnswerBox ask={t.ask} action={awaiting && confirmBtn} />}
+                <section className="card box">
+                  <h2 className="bh">Context</h2>
+                  <p className="goal">{t.description}</p>
+                  {t.refs.length > 0 && <p className="dw">{`Refs: ${t.refs.join(', ')}`}</p>}
+                </section>
+                <section className="card box">
+                  <h2 className="bh">Done when</h2>
+                  <p className="goal">{t.done_when}</p>
+                </section>
+              </div>
+              <div>
+                <section className="card box">
+                  <h2 className="bh">Links · status comes from these</h2>
+                  {t.links.length ? <LinkRows links={t.links} /> : <p className="s none">No links yet. Status moves by hand.</p>}
+                </section>
+                {t.epic_key && t.epic_next_step && (
+                  <section className="card box">
+                    <h2 className="bh">{`Epic ${t.epic_key} · next step`}</h2>
+                    <p className="goal">{t.epic_next_step}</p>
+                  </section>
+                )}
+              </div>
             </div>
             <p className="note reason">{t.reason}</p>
             {(t.flags.length > 0 || t.stalled) && (
@@ -104,10 +126,7 @@ export default function TaskDetail({ taskKey }: { taskKey: string }) {
             )}
             {t.status !== 'canceled' && (
               <div className="btns">
-                {t.flags.includes('awaiting_confirmation') && (
-                  <button type="button" className="btn" disabled={busy}
-                    onClick={() => void act('confirm-done', undefined, 'Confirm failed.')}>Confirm done</button>
-                )}
+                {awaiting && !t.ask && confirmBtn}
                 {!linked && (
                   <Menu label="Move ▾" disabled={busy}
                     items={TASK_COLUMNS.filter(([s]) => s !== t.status).map(([s, label]) => ({

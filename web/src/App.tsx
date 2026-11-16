@@ -63,6 +63,7 @@ const NAV = [
 
 function current(hash: string): string {
   const hit = NAV.find((n) => n.href === hash)
+  if (hash.startsWith('#/needs-you/')) return '#/needs-you'
   return hit ? hit.href : hash.startsWith('#/epic/') || hash.startsWith('#/task/') ? '' : '#/board'
 }
 
@@ -82,6 +83,7 @@ export default function App() {
   const on = current(hash)
   let screen
   if (hash === '#/needs-you') screen = <NeedsYou />
+  else if (hash.startsWith('#/needs-you/')) screen = <NeedsYou selected={hashKey(hash, 12)} />
   else if (hash === '#/stalled') screen = <Stalled />
   else if (hash === '#/unfiled') screen = <Unfiled />
   else if (hash === '#/tasks') screen = <TasksBoard />

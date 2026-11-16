@@ -30,16 +30,38 @@ export interface BoardResponse {
   columns: ColumnData[]
 }
 
-export interface NeedsYouRow {
-  kind: 'epic' | 'item' | 'task'
+export type AskKind = 'decide' | 'review' | 'release' | 'confirm' | 'later'
+
+// What the human is asked and how to answer (docs/design-needs-you-questions.md).
+export interface Ask {
+  ask_kind: AskKind
+  question: string | null
+  answer_how: string | null
+  reply_code: string | null
+  auto: boolean
+  missing_question: boolean
+}
+
+export interface ReleaseItem {
+  ref: string
+  title: string
+  url: string | null
+  project_key: string
+}
+
+export interface NeedsYouRow extends Ask {
+  kind: 'epic' | 'task' | 'release'
   id: number
   ref: string
   title: string
-  epic_key?: string | null
-  url?: string | null
+  project_key: string | null
+  epic_key: string | null
+  url: string | null
   waiting_on: string | null
   waiting_since: number | null
   reasons: string[]
+  context: string | null
+  items: ReleaseItem[] | null
 }
 
 export interface StalledRow {
@@ -176,4 +198,11 @@ export interface TaskDetailResponse extends TaskView {
   updated_at: number
   links: TaskLink[]
   events: EpicEvent[]
+  question?: string | null
+  answer_how?: string | null
+  reply_code?: string | null
+  ask_kind?: string | null
+  not_before?: number | null
+  epic_next_step?: string | null
+  ask?: Ask | null
 }

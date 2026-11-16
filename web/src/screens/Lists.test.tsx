@@ -4,26 +4,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import NeedsYou from './NeedsYou'
 import Stalled from './Stalled'
 import { clearToken } from '../token'
-import { PROJECTS, stubApi, urls } from '../test/api'
+import { needsRow, PROJECTS, stubApi, urls } from '../test/api'
 
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status })
 beforeEach(() => clearToken())
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
-
-it('test_needs_you_renders_server_order_with_reasons', async () => {
-  stubApi({ '/api/needs-you': [
-    { kind: 'epic', id: 1, ref: 'DEMO-E1', title: 'First', waiting_on: 'human:o', waiting_since: 1, reasons: ['waiting on you', 'awaiting your approval'] },
-    { kind: 'item', id: 9, ref: 'kanban:9', title: 'Second', url: 'https://x.test/9', waiting_on: 'human:o', waiting_since: 2, reasons: ['waiting on you'] },
-  ] })
-  render(<NeedsYou />)
-  await waitFor(() => screen.getByText('First'))
-  const items = screen.getAllByRole('listitem')
-  expect(items[0].textContent).toContain('First')
-  expect(items[1].textContent).toContain('Second')
-  expect(items[0].textContent).toContain('awaiting your approval')
-  expect(screen.getByText('First').closest('a')?.getAttribute('href')).toBe('#/epic/DEMO-E1')
-  expect(screen.getByText('Second').closest('a')?.getAttribute('href')).toBe('https://x.test/9')
-})
 
 it('test_stalled_groups_by_waiting_group', async () => {
   const row = (id: number, g: string, title: string) => ({ kind: 'item', id, ref: `k:${id}`, title, waiting_on: null, waiting_group: g, waiting_since: 1, stalled_for_hours: 5, url: null })
@@ -62,7 +47,7 @@ it('test_stalled_pill_names_who_and_age', async () => {
 
 it('test_needs_you_task_row_links_to_task', async () => {
   stubApi({ '/api/needs-you': [
-    { kind: 'task', id: 3, ref: 'DEMO-3', title: 'Sign off', epic_key: 'DEMO-E1', waiting_on: 'human:owner', waiting_since: 1, reasons: ['awaiting your confirmation'] },
+    needsRow('DEMO-3', 'confirm', { title: 'Sign off', reasons: ['awaiting your confirmation'] }),
   ] })
   render(<NeedsYou />)
   await screen.findByText('Sign off')
@@ -72,7 +57,7 @@ it('test_needs_you_task_row_links_to_task', async () => {
   const row = screen.getByText('Sign off').closest('li')!
   expect(row.querySelector('.src')!.textContent).toBe('task')
   expect(row.textContent).toContain('DEMO-3 · DEMO-E1')
-  expect(screen.getByRole('link', { name: 'Open task' }).getAttribute('href')).toBe('#/task/DEMO-3')
+  expect(screen.getByRole('link', { name: 'Context and details ›' }).getAttribute('href')).toBe('#/task/DEMO-3')
 })
 
 it('test_stalled_task_row_links_to_task', async () => {

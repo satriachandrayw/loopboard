@@ -64,3 +64,21 @@ export const tasksBoard = (lanes: { epic: { key: string; title: string; progress
   project: 'DEMO', columns: ['todo', 'in_progress', 'review', 'done'],
   lanes: lanes.map((l) => ({ epic: l.epic, tasks: { todo: [], in_progress: [], review: [], done: [], ...l.tasks } })),
 })
+
+// matchMedia answering min-width / max-width queries for a given viewport width.
+export function mockWidth(px: number) {
+  vi.stubGlobal('matchMedia', (q: string) => {
+    const min = /min-width:\s*(\d+)px/.exec(q)
+    const max = /max-width:\s*(\d+)px/.exec(q)
+    const matches = (!min || px >= Number(min[1])) && (!max || px <= Number(max[1]))
+    return { matches, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+      onchange: null, dispatchEvent: () => false }
+  })
+}
+
+export const needsRow = (ref: string, ask_kind: string, extra: Record<string, unknown> = {}) => ({
+  kind: 'task', id: Number(ref.split('-').pop()) || 1, ref, title: `Title ${ref}`, project_key: 'DEMO', epic_key: 'DEMO-E1',
+  url: null, waiting_on: 'human:owner', waiting_since: 1, reasons: ['waiting on you'], ask_kind,
+  question: `Question ${ref}?`, answer_how: 'Reply to your agent:', reply_code: `go ${ref}`, context: `Context ${ref}.`,
+  auto: false, missing_question: false, items: null, ...extra,
+})

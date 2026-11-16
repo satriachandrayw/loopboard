@@ -102,3 +102,12 @@ it('test_task_hash_opens_task_detail', async () => {
   render(<App />)
   expect(await screen.findByText('Detail summary')).toBeTruthy()
 })
+
+it('test_needs_you_selection_route_keeps_nav_on', async () => {
+  stubApi({ ...routes, '/api/needs-you': [] })
+  window.location.hash = '#/needs-you/DEMO-1'
+  render(<App />)
+  await screen.findByText('Nothing needs you right now.')
+  const nav = screen.getByRole('navigation', { name: 'Main' })
+  expect(within(nav).getAllByRole('link')[0].getAttribute('aria-current')).toBe('page')
+})

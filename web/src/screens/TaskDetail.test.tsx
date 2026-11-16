@@ -41,7 +41,8 @@ it('test_task_detail_shows_reason_and_links', async () => {
   expect(sub.querySelector('a')!.getAttribute('href')).toBe('#/epic/DEMO-E1')
   expect(sub.querySelector('.wait-human')!.textContent).toBe('you')
   expect(screen.getByText('Pin it in one place.')).toBeTruthy()
-  expect(screen.getByText('Done when: Checks pass on main.')).toBeTruthy()
+  expect(screen.getByText('Checks pass on main.')).toBeTruthy()
+  expect(screen.getByText('Done when')).toBeTruthy()
   expect(screen.getByText('Review: a linked PR is merged but not live yet')).toBeTruthy()
   const rows = within(screen.getByRole('table')).getAllByRole('row')
   expect(rows).toHaveLength(2)
@@ -109,4 +110,29 @@ it('test_unknown_task_says_so', async () => {
   stubApi({ '/api/tasks/DEMO-9': new Response('{}', { status: 404 }) })
   render(<TaskDetail taskKey="DEMO-9" />)
   expect((await screen.findByRole('alert')).textContent).toBe('Could not load the task.')
+})
+
+it('test_answer_box_first_and_epic_next_step', async () => {
+  stubApi({ '/api/tasks/DEMO-41': detail({
+    epic_next_step: 'Write the plan.',
+    ask: { ask_kind: 'decide', question: 'Ship it now?', answer_how: 'Reply to your agent:', reply_code: 'ship DEMO-41',
+      auto: false, missing_question: false },
+  }) })
+  render(<TaskDetail taskKey="DEMO-41" />)
+  await screen.findByText('Pin the runtime')
+  const heads = [...document.querySelectorAll('.body .bh')].map((h) => h.textContent)
+  expect(heads[0]).toBe('Your answer')
+  expect(heads).toContain('Context')
+  expect(heads).toContain('Epic DEMO-E1 · next step')
+  const box = screen.getByRole('region', { name: 'Your answer' })
+  expect(box.querySelector('.q')!.textContent).toBe('Ship it now?')
+  expect(box.querySelector('.code')!.textContent).toBe('ship DEMO-41')
+  expect(screen.getByText('Write the plan.')).toBeTruthy()
+})
+
+it('test_no_answer_box_without_ask', async () => {
+  stubApi({ '/api/tasks/DEMO-41': noLinks({ ask: null }) })
+  render(<TaskDetail taskKey="DEMO-41" />)
+  await screen.findByText('Pin the runtime')
+  expect(screen.queryByText('Your answer')).toBeNull()
 })
