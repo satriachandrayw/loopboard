@@ -27,7 +27,7 @@ interface Badges {
   unfiled: number | null
 }
 
-// Nav badges: Needs you rows and open Unfiled items, for the chosen project.
+// Nav badges: Needs you rows to answer now (not Later) and open Unfiled items, for the chosen project.
 function useBadges(hash: string): Badges {
   const [project] = useProject()
   const [badges, setBadges] = useState<Badges>({ needs: null, unfiled: null })
@@ -47,7 +47,7 @@ function useBadges(hash: string): Badges {
         return null // auth or network: the screen itself reports it
       }
     }
-    void Promise.all([count<NeedsYouRow>('/api/needs-you', () => true), count<UnfiledRow>('/api/unfiled', isOpenItem)])
+    void Promise.all([count<NeedsYouRow>('/api/needs-you', (r) => r.ask_kind !== 'later'), count<UnfiledRow>('/api/unfiled', isOpenItem)])
       .then(([needs, unfiled]) => { if (live) setBadges({ needs, unfiled }) })
     return () => { live = false }
   }, [project, hash, tick])

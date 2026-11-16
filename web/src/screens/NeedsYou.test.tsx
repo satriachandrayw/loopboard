@@ -22,6 +22,7 @@ const ROWS = [
   needsRow('DEMO-3', 'review'),
   release,
   needsRow('DEMO-4', 'confirm', { question: 'The agent says this is done. Is it?', reply_code: null,
+    reasons: ['awaiting your confirmation'],
     answer_how: 'Press Confirm done, or tell your agent what is missing.' }),
   needsRow('DEMO-5', 'later'),
   needsRow('DEMO-6', 'later'),
@@ -111,7 +112,7 @@ it('test_release_row_expands_to_items', async () => {
   const a = within(li).getByRole('link', { name: 'first' })
   expect(a.getAttribute('href')).toBe('https://example.test/pr/1')
   expect(a.getAttribute('target')).toBe('_blank')
-  expect(a.getAttribute('rel')).toBe('noreferrer')
+  expect(a.getAttribute('rel')).toBe('noopener noreferrer')
   expect(within(li).getByRole('link', { name: 'second' })).toBeTruthy()
 })
 
@@ -160,4 +161,48 @@ it('test_desktop_release_detail_lists_items', async () => {
   const pane = document.querySelector('.split .r') as HTMLElement
   expect(within(pane).getByText('Your answer')).toBeTruthy()
   expect(within(pane).getByRole('link', { name: 'second' }).getAttribute('target')).toBe('_blank')
+})
+
+it('test_stored_confirm_kind_without_flag_shows_its_code_not_the_button', async () => {
+  stubApi({ '/api/needs-you': [needsRow('DEMO-7', 'confirm', { reply_code: 'ok DEMO-7' })] })
+  render(<NeedsYou />)
+  const li = (await screen.findByText('Title DEMO-7')).closest('li')!
+  expect(li.querySelector('.kind')!.textContent).toBe('Confirm')
+  expect(li.querySelector('.code')!.textContent).toBe('ok DEMO-7')
+  expect(within(li).queryByRole('button', { name: 'Confirm done' })).toBeNull()
+})
+
+it('test_copy_failure_says_so_for_two_seconds', async () => {
+  const writeText = vi.fn(async () => { throw new Error('denied') })
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+  stubApi({ '/api/needs-you': ROWS })
+  render(<NeedsYou />)
+  const li = (await screen.findByText('Title DEMO-1')).closest('li')!
+  const btn = within(li).getByRole('button', { name: 'Copy go DEMO-1' })
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  fireEvent.click(btn)
+  await waitFor(() => expect(btn.textContent).toBe('Copy failed'))
+  vi.advanceTimersByTime(2100)
+  await waitFor(() => expect(btn.textContent).toBe('Copy'))
+})
+
+it('test_epic_row_links_to_epic', async () => {
+  stubApi({ '/api/needs-you': [needsRow('DEMO-E2', 'decide', { kind: 'epic', id: 2, epic_key: 'DEMO-E2', title: 'Spec sign-off' })] })
+  render(<NeedsYou />)
+  const title = await screen.findByText('Spec sign-off')
+  expect(title.closest('a')!.getAttribute('href')).toBe('#/epic/DEMO-E2')
+  const li = title.closest('li')!
+  expect(li.querySelector('.meta')!.textContent).toBe('epic DEMO-E2')
+  expect(within(li).getByRole('link', { name: 'Context and details ›' }).getAttribute('href')).toBe('#/epic/DEMO-E2')
+})
+
+it('test_desktop_split_has_one_main', async () => {
+  mockWidth(1280)
+  stubApi({ '/api/needs-you': ROWS, '/api/tasks/DEMO-1': {
+    ...taskView(1, 'todo', { summary: 'Title DEMO-1', description: 'Task context.' }),
+    merged_into: null, done_confirmed_at: null, created_at: 1, updated_at: 1, links: [], events: [], ask: null } })
+  render(<NeedsYou selected="DEMO-1" />)
+  await screen.findByText('Task context.')
+  expect(document.querySelectorAll('main')).toHaveLength(1)
+  expect(document.querySelector('.split .r > section.task-detail')).toBeTruthy()
 })

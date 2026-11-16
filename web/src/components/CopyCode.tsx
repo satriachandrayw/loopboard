@@ -2,25 +2,25 @@ import { useEffect, useState } from 'react'
 
 // The reply code in a monospace chip and a Copy button that copies exactly that code.
 export default function CopyCode({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false)
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   useEffect(() => {
-    if (!copied) return
-    const t = setTimeout(() => setCopied(false), 2000)
+    if (state === 'idle') return
+    const t = setTimeout(() => setState('idle'), 2000)
     return () => clearTimeout(t)
-  }, [copied])
+  }, [state])
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code)
-      setCopied(true)
+      setState('copied')
     } catch {
-      setCopied(false)
+      setState('failed') // no clipboard (plain http) or permission refused
     }
   }
   return (
     <>
       <code className="code">{code}</code>
       <button type="button" className="copy" onClick={() => void copy()} aria-label={`Copy ${code}`}>
-        {copied ? 'Copied' : 'Copy'}
+        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
       </button>
     </>
   )

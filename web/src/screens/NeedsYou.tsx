@@ -27,7 +27,7 @@ function ReleaseItems({ row }: { row: NeedsYouRow }) {
       {(row.items ?? []).map((i) => (
         <li key={i.ref} className="lnk">
           <span className="src">{i.ref.split(':')[0]}</span>
-          {i.url ? <a href={i.url} target="_blank" rel="noreferrer">{i.title}</a> : <span>{i.title}</span>}
+          {i.url ? <a href={i.url} target="_blank" rel="noopener noreferrer">{i.title}</a> : <span>{i.title}</span>}
         </li>
       ))}
     </ul>
@@ -66,7 +66,7 @@ function Row({ row: r, wide, selected, busy, onConfirm }: RowProps) {
         )}
       </div>
       <Question ask={r}>{r.context && <p className="ctx">{r.context}</p>}</Question>
-      {r.ask_kind === 'confirm' && r.kind === 'task' && (
+      {r.kind === 'task' && r.reasons.includes('awaiting your confirmation') && (
         <div className="btns">
           <button type="button" className="btn" disabled={busy} onClick={() => onConfirm(r.ref)}>Confirm done</button>
         </div>
@@ -82,10 +82,10 @@ function Row({ row: r, wide, selected, busy, onConfirm }: RowProps) {
 }
 
 function Detail({ row }: { row: NeedsYouRow }) {
-  if (row.kind === 'task') return <TaskDetail key={row.ref} taskKey={row.ref} />
+  if (row.kind === 'task') return <TaskDetail key={row.ref} taskKey={row.ref} embedded />
   const age = ageSince(row.waiting_since)
   return (
-    <main className="screen list task-detail">
+    <section className="screen list task-detail">
       <header className="top">
         <div className="key">{[row.ref, row.kind, age && `waiting on you ${age}`].filter(Boolean).join(' · ')}</div>
         <h1 className="t">{row.title}</h1>
@@ -105,7 +105,7 @@ function Detail({ row }: { row: NeedsYouRow }) {
           </section>
         )}
       </div>
-    </main>
+    </section>
   )
 }
 

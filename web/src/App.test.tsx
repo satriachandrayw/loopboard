@@ -111,3 +111,13 @@ it('test_needs_you_selection_route_keeps_nav_on', async () => {
   const nav = screen.getByRole('navigation', { name: 'Main' })
   expect(within(nav).getAllByRole('link')[0].getAttribute('aria-current')).toBe('page')
 })
+
+it('test_needs_you_badge_counts_only_rows_to_answer_now', async () => {
+  const row = (ref: string, ask_kind: string) => ({ kind: 'task', id: 1, ref, title: ref, waiting_on: 'human:o', waiting_since: 1,
+    reasons: ['waiting on you'], ask_kind })
+  stubApi({ ...routes, '/api/needs-you': [row('DEMO-1', 'decide'), row('DEMO-2', 'later'), row('DEMO-3', 'review'), row('DEMO-4', 'later')] })
+  render(<App />)
+  const nav = screen.getByRole('navigation', { name: 'Main' })
+  const needs = within(nav).getAllByRole('link')[0]
+  await waitFor(() => expect(within(needs).getByText('2')).toBeTruthy())
+})

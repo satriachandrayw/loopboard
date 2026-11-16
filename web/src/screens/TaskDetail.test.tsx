@@ -50,7 +50,7 @@ it('test_task_detail_shows_reason_and_links', async () => {
   expect(pr.textContent).toContain('Pin PR')
   expect(pr.getAttribute('href')).toBe('https://x.test/2')
   expect(pr.getAttribute('target')).toBe('_blank')
-  expect(pr.getAttribute('rel')).toBe('noreferrer')
+  expect(pr.getAttribute('rel')).toBe('noopener noreferrer')
   expect(rows[1].textContent).toContain('merged, not live')
   expect(rows[0].textContent).toContain('done')
   expect(screen.getByText(/task\.created/)).toBeTruthy()
@@ -135,4 +135,15 @@ it('test_no_answer_box_without_ask', async () => {
   render(<TaskDetail taskKey="DEMO-41" />)
   await screen.findByText('Pin the runtime')
   expect(screen.queryByText('Your answer')).toBeNull()
+})
+
+it('test_confirm_done_needs_the_flag_not_the_kind', async () => {
+  stubApi({ '/api/tasks/DEMO-41': noLinks({
+    ask: { ask_kind: 'confirm', question: 'Is the demo good?', answer_how: 'Reply to your agent:', reply_code: 'ok DEMO-41',
+      auto: false, missing_question: false },
+  }) })
+  render(<TaskDetail taskKey="DEMO-41" />)
+  await screen.findByText('Is the demo good?')
+  expect(screen.queryByRole('button', { name: 'Confirm done' })).toBeNull()
+  expect(screen.getByRole('region', { name: 'Your answer' }).querySelector('.code')!.textContent).toBe('ok DEMO-41')
 })

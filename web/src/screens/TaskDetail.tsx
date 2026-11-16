@@ -26,7 +26,7 @@ function LinkRows({ links }: { links: TaskLink[] }) {
           const label = `${icon ? `${icon} ` : ''}${word} "${l.title}"`
           return (
             <tr key={l.id}>
-              <td>{l.url ? <a href={l.url} target="_blank" rel="noreferrer">{label}</a> : label}</td>
+              <td>{l.url ? <a href={l.url} target="_blank" rel="noopener noreferrer">{label}</a> : label}</td>
               <td className="st"><span className={`status st-${cat}`}>{state}</span></td>
             </tr>
           )
@@ -36,7 +36,8 @@ function LinkRows({ links }: { links: TaskLink[] }) {
   )
 }
 
-export default function TaskDetail({ taskKey }: { taskKey: string }) {
+// `embedded`: inside the Needs you desktop split, so a <section> rather than a second <main>.
+export default function TaskDetail({ taskKey, embedded = false }: { taskKey: string; embedded?: boolean }) {
   const k = encodeURIComponent(taskKey)
   const { data, needsAuth, setNeedsAuth, error, setError, load } =
     useApi<TaskDetailResponse>(`/api/tasks/${k}`, 'Could not load the task.')
@@ -68,8 +69,9 @@ export default function TaskDetail({ taskKey }: { taskKey: string }) {
     <button type="button" className="btn" disabled={busy}
       onClick={() => void act('confirm-done', undefined, 'Confirm failed.')}>Confirm done</button>
   )
+  const Root = embedded ? 'section' : 'main'
   return (
-    <main className="screen list task-detail">
+    <Root className="screen list task-detail">
       {error && <p className="error" role="alert">{error}</p>}
       {t && (
         <>
@@ -148,6 +150,6 @@ export default function TaskDetail({ taskKey }: { taskKey: string }) {
           </div>
         </>
       )}
-    </main>
+    </Root>
   )
 }
