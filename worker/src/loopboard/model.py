@@ -115,6 +115,21 @@ def _description(v):
     return v
 
 
+ASK_KINDS = ("decide", "review", "release", "confirm")
+
+
+def _ask_text(v):
+    """Ask fields (question, answer_how, reply_code): stripped; blank counts as missing (None).
+    Runs before the length check, so the limits apply to the stripped text."""
+    if isinstance(v, str):
+        v = v.strip()
+        return v or None
+    return v
+
+
+_ASK_TEXT = ("question", "answer_how", "reply_code")
+
+
 class ProjectIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -135,9 +150,13 @@ class EpicIn(BaseModel):
     spec_url: str | None = Field(default=None, max_length=500)
     plan_url: str | None = Field(default=None, max_length=500)
     manual_column: Literal[EPIC_MANUAL_COLUMNS] = "backlog"  # type: ignore[valid-type]
+    question: str | None = Field(default=None, max_length=300)
+    answer_how: str | None = Field(default=None, max_length=200)
+    reply_code: str | None = Field(default=None, max_length=80)
 
     _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
     _goal = field_validator("goal")(_description)
+    _ask = field_validator(*_ASK_TEXT, mode="before")(_ask_text)
 
     @model_validator(mode="after")
     def _waiting(self):
@@ -159,9 +178,13 @@ class EpicPatch(BaseModel):
     spec_url: str | None = Field(default=None, max_length=500)
     plan_url: str | None = Field(default=None, max_length=500)
     manual_column: Literal[EPIC_MANUAL_COLUMNS] | None = None  # type: ignore[valid-type]
+    question: str | None = Field(default=None, max_length=300)
+    answer_how: str | None = Field(default=None, max_length=200)
+    reply_code: str | None = Field(default=None, max_length=80)
 
     _urls = field_validator("home_url", "spec_url", "plan_url")(_http_url)
     _goal = field_validator("goal")(_description)
+    _ask = field_validator(*_ASK_TEXT, mode="before")(_ask_text)
 
 
 class FilingIn(BaseModel):
@@ -202,8 +225,20 @@ class TaskIn(BaseModel):
     epic_key: str | None = Field(default=None, pattern=EPIC_KEY)
     refs: _Refs = Field(default_factory=list, max_length=10)
     item_id: int | None = None
+    question: str | None = Field(default=None, max_length=300)
+    answer_how: str | None = Field(default=None, max_length=200)
+    reply_code: str | None = Field(default=None, max_length=80)
+    ask_kind: Literal[ASK_KINDS] | None = None  # type: ignore[valid-type]
+    not_before: int | None = Field(default=None, ge=0)
 
     _refs = field_validator("refs")(_refs)
+    _ask = field_validator(*_ASK_TEXT, mode="before")(_ask_text)
+
+    @model_validator(mode="after")
+    def _kind(self):
+        if self.question and not self.ask_kind:
+            self.ask_kind = "decide"
+        return self
 
 
 class TaskPatch(BaseModel):
@@ -220,8 +255,14 @@ class TaskPatch(BaseModel):
     priority: Literal[PRIORITIES] | None = None  # type: ignore[valid-type]
     epic_key: str | None = Field(default=None, pattern=EPIC_KEY)
     refs: _Refs | None = Field(default=None, max_length=10)
+    question: str | None = Field(default=None, max_length=300)
+    answer_how: str | None = Field(default=None, max_length=200)
+    reply_code: str | None = Field(default=None, max_length=80)
+    ask_kind: Literal[ASK_KINDS] | None = None  # type: ignore[valid-type]
+    not_before: int | None = Field(default=None, ge=0)
 
     _refs = field_validator("refs")(_refs)
+    _ask = field_validator(*_ASK_TEXT, mode="before")(_ask_text)
 
 
 class TaskStatusIn(BaseModel):

@@ -332,3 +332,76 @@ async def test_link_to_merged_key_links_survivor(make_app, client_for):
     await req(client_for, app, h, "POST", "/api/tasks/DEMO-1/status", {"status": "canceled"})
     r = await req(client_for, app, h, "POST", f"/api/items/{i}/link", {"task_key": "DEMO-2"})
     assert r.status_code == 422
+
+
+TASK_RULE = "A task waiting on a human needs a question and how to answer."
+ASK = {"question": "Ship it now?", "answer_how": "Reply to your agent:"}
+
+
+async def test_human_task_needs_question(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    for partial in ({}, {"question": "Ship it now?"}, {"answer_how": "Reply"}, {"question": " ", "answer_how": " "}):
+        r = await mk_task(client_for, app, h, waiting_on="human:owner", **partial)
+        assert (r.status_code, r.json()["detail"]) == (422, TASK_RULE), partial
+    assert (await repo.first("select count(*) as n from tasks"))["n"] == 0
+    r = await mk_task(client_for, app, h, waiting_on="human:owner", reply_code="ship DEMO", not_before=NOW + 60,
+                      **ASK)
+    assert r.status_code == 201
+    t = await task_row(repo, "DEMO-1")
+    assert (t["question"], t["answer_how"], t["reply_code"], t["ask_kind"], t["not_before"]) == (
+        "Ship it now?", "Reply to your agent:", "ship DEMO", "decide", NOW + 60)
+    ev = await repo.first("select payload from events where kind='task.created'")
+    assert json.loads(ev["payload"])["question"] == "Ship it now?"
+    # an agent-waiting task needs no question
+    assert (await mk_task(client_for, app, h)).status_code == 201
+
+
+async def test_patch_to_human_needs_question(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    await mk_task(client_for, app, h)
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1", {"waiting_on": "human:owner"})
+    assert (r.status_code, r.json()["detail"]) == (422, TASK_RULE)
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1",
+                  {"waiting_on": "human:owner", "question": "Ship it now?"})
+    assert r.status_code == 422
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1",
+                  {"waiting_on": "human:owner", **ASK, "ask_kind": "review"})
+    assert r.status_code == 200
+    t = await task_row(repo, "DEMO-1")
+    assert (t["waiting_on"], t["question"], t["ask_kind"]) == ("human:owner", "Ship it now?", "review")
+    ev = (await repo.query("select payload from events where kind='task.updated' order by id"))[-1]
+    assert json.loads(ev["payload"])["question"] == "Ship it now?"
+    # clearing the question while it still waits on a human is refused
+    for clear in ({"question": None}, {"answer_how": "  "}):
+        r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1", clear)
+        assert (r.status_code, r.json()["detail"]) == (422, TASK_RULE), clear
+    # handing it back to the agent may clear the ask
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1",
+                  {"waiting_on": "agent:coder", "question": None, "answer_how": None, "not_before": None})
+    assert r.status_code == 200 and (await task_row(repo, "DEMO-1"))["question"] is None
+
+
+async def test_patch_question_defaults_kind_to_decide(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    await mk_task(client_for, app, h)
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1", {"waiting_on": "human:owner", **ASK})
+    assert r.status_code == 200 and (await task_row(repo, "DEMO-1"))["ask_kind"] == "decide"
+
+
+async def test_patch_untouched_ask_fields_keeps_old_rows_working(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    await mk_task(client_for, app, h)
+    await repo.execute("update tasks set waiting_on = 'human:owner' where key = 'DEMO-1'")
+    r = await req(client_for, app, h, "PATCH", "/api/tasks/DEMO-1", {"priority": "high"})
+    assert r.status_code == 200 and (await task_row(repo, "DEMO-1"))["priority"] == "high"
+
+
+async def test_filed_item_waiting_on_human_still_gets_auto_task(make_app, client_for):
+    app, repo, h, _ = await world(make_app, client_for)
+    i = await repo.execute(
+        "insert into items(source,external_id,filing,title,status_category,waiting_on,"
+        "last_activity_at,created_at,updated_at) values('kanban','7','unfiled','Ask','blocked','human:owner',1,1,1)")
+    r = await req(client_for, app, h, "POST", f"/api/items/{i}/filing", {"filing": "epic", "epic_key": "DEMO-E1"})
+    assert r.status_code == 200
+    t = await task_row(repo, "DEMO-1")
+    assert (t["waiting_on"], t["question"]) == ("human:owner", None)

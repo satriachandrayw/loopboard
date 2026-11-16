@@ -112,3 +112,34 @@ def test_task_patch_status_link_merge_models():
     assert ItemIn(**base, task_key="DEMO-3").task_key == "DEMO-3"
     with pytest.raises(ValueError):
         ItemIn(**base, task_key="DEMO-E3")
+
+
+def test_ask_fields_limits_and_blanks():
+    from loopboard.model import EpicIn, EpicPatch, TaskIn, TaskPatch
+
+    t = TaskIn(**_task(question="  Ship it?  ", answer_how=" Reply ", reply_code=" go "))
+    assert (t.question, t.answer_how, t.reply_code, t.ask_kind, t.not_before) == ("Ship it?", "Reply", "go",
+                                                                                   "decide", None)
+    t = TaskIn(**_task(question="   ", answer_how="", reply_code=" "))
+    assert (t.question, t.answer_how, t.reply_code, t.ask_kind) == (None, None, None, None)
+    assert TaskIn(**_task(question="q", ask_kind="review", not_before=1_800_000_000)).ask_kind == "review"
+    for field, bad in [("question", "x" * 301), ("answer_how", "x" * 201), ("reply_code", "x" * 81),
+                       ("ask_kind", "later"), ("ask_kind", "nope"), ("not_before", -1)]:
+        with pytest.raises(ValueError):
+            TaskIn(**_task(**{field: bad}))
+        if field != "not_before":
+            with pytest.raises(ValueError):
+                TaskPatch(**{field: bad})
+    assert TaskIn(**_task(question="x" * 300, answer_how="y" * 200, reply_code="z" * 80)).reply_code == "z" * 80
+    p = TaskPatch(question=None, not_before=None)
+    assert p.model_fields_set == {"question", "not_before"}
+    assert TaskPatch(question="  ").question is None
+    e = EpicIn(title="T", goal="g", waiting_on="human:owner", question=" Go? ", answer_how=" Reply ")
+    assert (e.question, e.answer_how, e.reply_code) == ("Go?", "Reply", None)
+    for field, bad in [("question", "x" * 301), ("answer_how", "x" * 201), ("reply_code", "x" * 81)]:
+        with pytest.raises(ValueError):
+            EpicIn(title="T", goal="g", waiting_on="agent:a", **{field: bad})
+        with pytest.raises(ValueError):
+            EpicPatch(**{field: bad})
+    with pytest.raises(ValueError):
+        EpicIn(title="T", goal="g", waiting_on="agent:a", ask_kind="decide")

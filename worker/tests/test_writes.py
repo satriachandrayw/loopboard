@@ -280,7 +280,7 @@ async def test_patch_epic_waiting_on_null_only_when_canceled(make_app, client_fo
     r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"manual_column": "todo"})
     assert r.status_code == 422
     r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1",
-                  {"manual_column": "todo", "waiting_on": "human:owner"})
+                  {"manual_column": "todo", "waiting_on": "human:owner", "question": "Go?", "answer_how": "Reply"})
     assert r.status_code == 200
 
 
@@ -423,3 +423,36 @@ async def test_patch_goal_cannot_be_blanked_or_nulled(make_app, client_for):
     assert r.status_code == 200 and r.json()["goal"] == "New"
     r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"title": "Renamed"})
     assert r.status_code == 200 and r.json()["goal"] == "New"
+
+
+EPIC_RULE = "An epic waiting on a human needs a question and how to answer."
+
+
+async def test_human_epic_needs_question(make_app, client_for):
+    app, repo, h = await setup(make_app)
+    await mk_project(client_for, app, h)
+    for partial in ({}, {"question": "Go?"}, {"answer_how": "Reply"}):
+        r = await mk_epic(client_for, app, h, waiting_on="human:owner", **partial)
+        assert (r.status_code, r.json()["detail"]) == (422, EPIC_RULE), partial
+    r = await mk_epic(client_for, app, h, waiting_on="human:owner", question="Go?", answer_how="Reply",
+                      reply_code="go DEMO")
+    assert r.status_code == 201
+    e = await epic(repo)
+    assert (e["question"], e["answer_how"], e["reply_code"]) == ("Go?", "Reply", "go DEMO")
+    assert json.loads((await evs(repo, "epic.created"))[0]["payload"])["question"] == "Go?"
+
+
+async def test_patch_epic_to_human_needs_question(make_app, client_for):
+    app, repo, h = await seeded(make_app, client_for)
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"waiting_on": "human:owner"})
+    assert (r.status_code, r.json()["detail"]) == (422, EPIC_RULE)
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1",
+                  {"waiting_on": "human:owner", "question": "Go?", "answer_how": "Reply"})
+    assert r.status_code == 200
+    assert json.loads((await evs(repo, "epic.updated"))[-1]["payload"])["answer_how"] == "Reply"
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"question": None})
+    assert (r.status_code, r.json()["detail"]) == (422, EPIC_RULE)
+    # an old human-waiting epic without a question keeps working for other patches
+    await repo.execute("update epics set question = null where key = 'DEMO-E1'")
+    r = await req(client_for, app, h, "PATCH", "/api/epics/DEMO-E1", {"title": "Renamed"})
+    assert r.status_code == 200

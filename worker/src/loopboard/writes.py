@@ -9,8 +9,24 @@ EVENT = ("insert into events(at, actor, via, subject_type, subject_id, kind, pay
 EVENT_BY_SQL = ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
                 "select ?, ?, 'api', ?, id, ?, ? from {table} where {where}")
 EPIC_FIELDS = ("title", "goal", "stage", "owner", "next_step", "waiting_on", "home_url", "spec_url",
-               "plan_url", "manual_column")
+               "plan_url", "manual_column", "question", "answer_how", "reply_code")
 NOT_NULL = ("title", "goal", "stage", "manual_column")
+TASK_ASK_RULE = "A task waiting on a human needs a question and how to answer."
+EPIC_ASK_RULE = "An epic waiting on a human needs a question and how to answer."
+
+
+def _waits_without_ask(row) -> bool:
+    """True when the row waits on a human but lacks a question or how to answer."""
+    return (row.get("waiting_on") or "").startswith("human:") and not (row.get("question") and row.get("answer_how"))
+
+
+def _check_ask(before, given, message):
+    """The waiting-on-a-human rule for a patch: only when it sets waiting_on to a human or touches
+    question/answer_how, so rows from before the rule keep taking other patches."""
+    sets_human = (given.get("waiting_on") or "").startswith("human:")
+    touches = "question" in given or "answer_how" in given
+    if (sets_human or touches) and _waits_without_ask({**before, **given}):
+        raise ValidationError(message)
 
 
 class NotFound(LookupError):
@@ -67,6 +83,8 @@ async def create_project(repo, *, key, name, actor, now):
 
 
 async def create_epic(repo, *, project_key, body: EpicIn, actor, now):
+    if _waits_without_ask(body.model_dump()):
+        raise ValidationError(EPIC_ASK_RULE)
     project = await _project(repo, project_key)
     row = await repo.first("select max(seq) as m from epics where project_id = ?", (project["id"],))
     seq = (row["m"] or 0) + 1
@@ -97,6 +115,7 @@ async def patch_epic(repo, *, key, changes: EpicPatch, actor, now):
     if after["manual_column"] != "canceled" and not after["waiting_on"] and (
             "waiting_on" in given or epic["manual_column"] == "canceled"):
         raise ValidationError("waiting_on is required unless the epic is canceled")
+    _check_ask(epic, given, EPIC_ASK_RULE)
     changed = {k: v for k, v in given.items() if epic[k] != v}
     if changed:
         sets = ", ".join(f"{k} = ?" for k in changed)
@@ -235,7 +254,8 @@ async def put_source(repo, *, name, stall_hours, actor, now):
 
 # --- tasks ---
 
-TASK_FIELDS = ("summary", "description", "done_when", "owner", "waiting_on", "type", "priority", "refs")
+TASK_FIELDS = ("summary", "description", "done_when", "owner", "waiting_on", "type", "priority", "refs",
+               "question", "answer_how", "reply_code", "ask_kind", "not_before")
 TASK_NOT_NULL = ("summary", "description", "done_when", "owner", "type", "priority", "refs")
 TASK_BY_KEY = "(select id from tasks where key = ?)"
 AUTO_DONE_WHEN = "The linked work is live."
@@ -313,6 +333,8 @@ async def _resolve_epic(repo, epic_key, project_id):
 
 
 async def create_task(repo, *, project_key, body: TaskIn, actor, now) -> dict:
+    if _waits_without_ask(body.model_dump()):
+        raise ValidationError(TASK_ASK_RULE)
     project = await _project(repo, project_key)
     epic = await _resolve_epic(repo, body.epic_key, project["id"])
     epic_id = epic["id"] if epic else None
@@ -365,6 +387,9 @@ async def patch_task(repo, *, key, changes: TaskPatch, actor, now) -> dict:
     task = await _task(repo, key)
     if "waiting_on" in given and given["waiting_on"] is None and task["status"] not in ("done", "canceled"):
         raise ValidationError("waiting_on is required while the task is open")
+    _check_ask(task, given, TASK_ASK_RULE)
+    if given.get("question") and not given.get("ask_kind", task["ask_kind"]):
+        given["ask_kind"] = "decide"
     move = "epic_key" in given
     new_epic = await _resolve_epic(repo, given.pop("epic_key", None), task["project_id"]) if move else None
     if "refs" in given:
