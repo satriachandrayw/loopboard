@@ -22,10 +22,14 @@ it('test_posts_the_right_body_and_reports_the_new_key', async () => {
   await userEvent.type(screen.getByLabelText('Title'), 'New thing')
   await userEvent.selectOptions(screen.getByLabelText('Stage'), 'spec')
   await userEvent.type(screen.getByLabelText('Description'), '  Make it work ')
+  await userEvent.type(screen.getByLabelText(/^Question for you/), ' Approve the spec? ')
+  await userEvent.type(screen.getByLabelText(/^How to answer/), 'Reply to your agent:')
+  await userEvent.type(screen.getByLabelText('Reply code (optional)'), 'ok SAMPLE')
   await userEvent.click(screen.getByRole('button', { name: 'Create' }))
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith('SAMPLE-E3'))
   expect(posts(f)).toEqual([{ url: '/api/projects/SAMPLE/epics',
-    body: { title: 'New thing', stage: 'spec', waiting_on: 'human:jo.doe', goal: 'Make it work' } }])
+    body: { title: 'New thing', stage: 'spec', waiting_on: 'human:jo.doe', goal: 'Make it work',
+      question: 'Approve the spec?', answer_how: 'Reply to your agent:', reply_code: 'ok SAMPLE' } }])
 })
 
 it('test_agent_waiting_on', async () => {
@@ -71,4 +75,17 @@ it('test_prefills_title', () => {
   stubApi({})
   render(<NewEpicForm projects={PROJECTS} initialProject="DEMO" initialTitle="From item" onCreated={() => {}} onCancel={() => {}} />)
   expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('From item')
+})
+
+it('test_human_epic_form_requires_question', async () => {
+  const f = stubApi({ 'POST /api/projects/DEMO/epics': created })
+  render(<NewEpicForm projects={PROJECTS} initialProject="DEMO" onCreated={() => {}} onCancel={() => {}} />)
+  await userEvent.type(screen.getByLabelText('Title'), 'T')
+  await userEvent.type(screen.getByLabelText('Description'), 'Why')
+  expect(screen.queryByLabelText('Kind')).toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+  expect((await screen.findByRole('alert')).textContent).toBe('Write the question and how to answer: this epic waits on a human.')
+  expect(posts(f)).toEqual([])
+  await userEvent.selectOptions(screen.getByLabelText('Waiting on kind'), 'agent')
+  expect(screen.queryByLabelText(/^Question for you/)).toBeNull()
 })

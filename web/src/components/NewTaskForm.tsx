@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { apiGet, apiPost, AuthError } from '../api'
+import AskFields, { askBody, askComplete, useAsk } from './AskFields'
 import { localPart } from './NewEpicForm'
 import type { BoardResponse, Card, Project } from '../types'
 
@@ -49,6 +50,8 @@ export default function NewTaskForm({ projects, initialProject = '', initialEpic
   const [kind, setKind] = useState<'human' | 'agent'>('human')
   const [name, setName] = useState('owner')
   const [refs, setRefs] = useState('')
+  const [ask, setAsk] = useAsk()
+  const [askInvalid, setAskInvalid] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const touched = useRef({ owner: false, name: false })
@@ -80,10 +83,15 @@ export default function NewTaskForm({ projects, initialProject = '', initialEpic
     if (!doneWhen.trim()) return setError('Add a "Done when" line.')
     if (!owner.trim()) return setError('Say who owns it.')
     if (!name.trim()) return setError('Say who it waits on.')
+    if (kind === 'human' && !askComplete(ask)) {
+      setAskInvalid(true)
+      return setError('Write the question and how to answer: this task waits on a human.')
+    }
     if (!refList.every((r) => REF.test(r))) return setError('Refs look like ABC-123.')
     const body = {
       summary: summary.trim(), description: description.trim(), done_when: doneWhen.trim(), owner: owner.trim(),
       waiting_on: `${kind}:${name.trim()}`, type, priority, epic_key: epic || null, refs: refList,
+      ...(kind === 'human' ? askBody(ask, true) : {}),
       ...(itemId !== undefined ? { item_id: itemId } : {}),
     }
     setBusy(true)
@@ -165,6 +173,7 @@ export default function NewTaskForm({ projects, initialProject = '', initialEpic
               </div>
             </div>
           </div>
+          {kind === 'human' && <AskFields ask={ask} setAsk={setAsk} task invalid={askInvalid} />}
           <label className="field">
             <span>Refs (other keys that mean this task)</span>
             <input value={refs} placeholder="ABC-123, ABC-124" onChange={(e) => setRefs(e.target.value)} />

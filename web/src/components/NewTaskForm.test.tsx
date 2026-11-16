@@ -21,7 +21,8 @@ it('test_new_task_form_required_fields_and_body', async () => {
   render(<NewTaskForm projects={PROJECTS} initialProject="DEMO" onCreated={created} onCancel={() => {}} />)
   const marks = [...document.querySelectorAll('.field > span:first-child')]
     .filter((s) => s.querySelector('i.req')).map((s) => s.firstChild!.textContent!.trim())
-  expect(marks).toEqual(['Project', 'Type', 'Summary', 'Description', 'Done when', 'Owner', 'Waiting on'])
+  expect(marks).toEqual(['Project', 'Type', 'Summary', 'Description', 'Done when', 'Owner', 'Waiting on',
+    'Question for you', 'How to answer'])
   const create = screen.getByRole('button', { name: 'Create task' })
   const expectError = async (msg: string) => {
     await userEvent.click(create)
@@ -67,6 +68,35 @@ it('test_new_task_form_needs_a_project_and_shows_server_failure', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('Choose a project.')
   await userEvent.selectOptions(field(/^Project/), 'SAMPLE')
   expect([...(field(/^Epic/) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['No epic', 'SAMPLE-E1 · Sample epic'])
+  await userEvent.type(field(/^Question for you/), 'Go?')
+  await userEvent.type(field(/^How to answer/), 'Reply')
   await userEvent.click(screen.getByRole('button', { name: 'Create task' }))
   expect((await screen.findByRole('alert')).textContent).toBe('Could not create the task.')
+})
+
+it('test_human_task_form_requires_question', async () => {
+  const f = stubApi({ '/api/board': BOARD, 'POST /api/projects/DEMO/tasks': taskView(8, 'todo') })
+  const created = vi.fn()
+  render(<NewTaskForm projects={PROJECTS} initialProject="DEMO" initialSummary="Approve the go-live" onCreated={created} onCancel={() => {}} />)
+  await userEvent.type(field(/^Description/), 'd')
+  await userEvent.type(field(/^Done when/), 'w')
+  const create = screen.getByRole('button', { name: 'Create task' })
+  await userEvent.click(create)
+  expect((await screen.findByRole('alert')).textContent).toBe('Write the question and how to answer: this task waits on a human.')
+  expect(posts(f)).toEqual([])
+  expect(field(/^Question for you/).classList.contains('err')).toBe(true)
+  await userEvent.type(field(/^Question for you/), ' Ship it? ')
+  await userEvent.click(create)
+  expect(posts(f)).toEqual([])
+  await userEvent.type(field(/^How to answer/), 'Reply to your agent:')
+  await userEvent.type(field(/^Reply code/), 'ship DEMO')
+  expect([...(field(/^Kind/) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Decide', 'Confirm', 'Release', 'Review'])
+  await userEvent.selectOptions(field(/^Kind/), 'review')
+  await userEvent.type(field(/^Not before/), '2026-12-22')
+  await userEvent.click(create)
+  await waitFor(() => expect(created).toHaveBeenCalledWith('DEMO-8'))
+  expect(posts(f)[0].body).toMatchObject({
+    waiting_on: 'human:owner', question: 'Ship it?', answer_how: 'Reply to your agent:', reply_code: 'ship DEMO',
+    ask_kind: 'review', not_before: Math.floor(new Date(2026, 11, 22).getTime() / 1000),
+  })
 })

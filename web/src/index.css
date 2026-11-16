@@ -255,6 +255,9 @@ table.t a { color: var(--text); }
 .split .r .tcols { display: flex; gap: 14px; }
 .split .r .tcols > div { flex: 1 1 0; min-width: 0; }
 
+.field em.ask-note { color: var(--you); }
+.field input.err { border-color: var(--red); }
+
 .token-prompt { max-width: 360px; margin: 48px auto; display: flex; flex-direction: column; gap: 8px; }
 .token-prompt input { background: var(--col); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: block; width: 100%; margin-top: 4px; }
 

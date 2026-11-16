@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, AuthError } from '../api'
+import AskFields, { askBody, askComplete, useAsk } from './AskFields'
 import type { Project } from '../types'
 
 const STAGES = ['idea', 'spec', 'plan', 'build', 'review', 'ship']
@@ -23,6 +24,8 @@ export default function NewEpicForm({ projects, initialProject = '', initialTitl
   const [kind, setKind] = useState<'human' | 'agent'>('human')
   const [name, setName] = useState('owner')
   const [goal, setGoal] = useState('')
+  const [ask, setAsk] = useAsk()
+  const [askInvalid, setAskInvalid] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const nameTouched = useRef(false)
@@ -40,7 +43,14 @@ export default function NewEpicForm({ projects, initialProject = '', initialTitl
     if (!project) return setError('Choose a project.')
     if (!name.trim()) return setError('Say who it waits on.')
     if (!goal.trim()) return setError('Add a description: what this epic is for.')
-    const body = { title: title.trim(), stage, waiting_on: `${kind}:${name.trim()}`, goal: goal.trim() }
+    if (kind === 'human' && !askComplete(ask)) {
+      setAskInvalid(true)
+      return setError('Write the question and how to answer: this epic waits on a human.')
+    }
+    const body = {
+      title: title.trim(), stage, waiting_on: `${kind}:${name.trim()}`, goal: goal.trim(),
+      ...(kind === 'human' ? askBody(ask, false) : {}),
+    }
     setBusy(true)
     setError(null)
     try {
@@ -91,6 +101,7 @@ export default function NewEpicForm({ projects, initialProject = '', initialTitl
             <span>Description</span>
             <textarea rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} />
           </label>
+          {kind === 'human' && <AskFields ask={ask} setAsk={setAsk} task={false} invalid={askInvalid} />}
           {error && <p className="error" role="alert">{error}</p>}
           <div className="btns">
             <button type="submit" className="btn" disabled={busy}>Create</button>

@@ -113,6 +113,8 @@ it('test_new_task_from_unfiled_row_links_item', async () => {
   expect((within(dialog).getByLabelText(/^Project/) as HTMLSelectElement).value).toBe('SAMPLE')
   await userEvent.type(within(dialog).getByLabelText(/^Description/), 'Why')
   await userEvent.type(within(dialog).getByLabelText(/^Done when/), 'Live')
+  await userEvent.type(within(dialog).getByLabelText(/^Question for you/), 'Go?')
+  await userEvent.type(within(dialog).getByLabelText(/^How to answer/), 'Reply')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Create task' }))
   await waitFor(() => expect(posts(f).map((p) => p.url)).toEqual(['/api/projects/SAMPLE/tasks']))
   expect(posts(f)[0].body).toMatchObject({ summary: 'Open two', item_id: 2, description: 'Why', done_when: 'Live' })

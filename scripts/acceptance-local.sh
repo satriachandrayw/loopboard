@@ -226,6 +226,28 @@ PY
 then ok "8 GET /api/tasks/$TASK shows the link"; else fail "8 task detail after link"; fi
 set -e
 
+# 9: needs-you questions. A task waiting on a human needs a question and how to answer.
+set +e
+ASK_TASK='{"summary":"Acceptance ask","description":"Checks the ask rule.","done_when":"The owner answered.","owner":"owner","waiting_on":"human:owner"'
+r="$(api POST /api/projects/DEMO/tasks "$ASK_TASK}")"
+[ "${r##*$'\n'}" = 422 ] && printf '%s' "${r%$'\n'*}" | grep -q 'A task waiting on a human needs a question and how to answer.' \
+  && ok "9 human task without a question -> 422" || fail "9 human task without a question -> ${r##*$'\n'}"
+r="$(api POST /api/projects/DEMO/tasks "$ASK_TASK,\"question\":\"Ship the acceptance task?\",\"answer_how\":\"Reply to your agent:\",\"reply_code\":\"ship DEMO\"}")"
+[ "${r##*$'\n'}" = 201 ] && ok "9 human task with a question -> 201" || fail "9 human task with a question -> ${r##*$'\n'}"
+ASK_KEY="$(printf '%s' "${r%$'\n'*}" | jget "d['key']" 2>/dev/null || echo "")"
+api GET /api/needs-you | sed '$d' >"$TMP/needs.json"
+if python3 - "$TMP/needs.json" "$ASK_KEY" <<'PY'
+import json, sys
+rows = json.load(open(sys.argv[1]))
+row = [r for r in rows if r["ref"] == sys.argv[2]]
+assert row, [r["ref"] for r in rows]
+assert row[0]["question"] == "Ship the acceptance task?" and row[0]["ask_kind"] == "decide", row[0]
+assert row[0]["reply_code"] == "ship DEMO", row[0]
+assert all(r.get("question") and r.get("ask_kind") for r in rows), rows
+PY
+then ok "9 GET /api/needs-you row for $ASK_KEY carries question and ask_kind"; else fail "9 needs-you row question"; fi
+set -e
+
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/board")"
 [ "$code" = 401 ] && ok "6 /api/board without token -> 401" || fail "6 /api/board without token -> $code"
 

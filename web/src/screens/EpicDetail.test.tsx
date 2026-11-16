@@ -47,6 +47,8 @@ it('test_epic_detail_lists_tasks_and_add_task', async () => {
   await userEvent.type(screen.getByLabelText(/^Summary/), 'T-new')
   await userEvent.type(screen.getByLabelText(/^Description/), 'd')
   await userEvent.type(screen.getByLabelText(/^Done when/), 'w')
+  await userEvent.type(screen.getByLabelText(/^Question for you/), 'Go?')
+  await userEvent.type(screen.getByLabelText(/^How to answer/), 'Reply')
   await userEvent.click(screen.getByRole('button', { name: 'Create task' }))
   await screen.findByText('T-new')
   expect(posts(f)[0].body.epic_key).toBe('DEMO-E1')

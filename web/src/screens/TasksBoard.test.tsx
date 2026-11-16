@@ -117,6 +117,8 @@ it('test_add_task_button_opens_the_form_and_reloads', async () => {
   await userEvent.type(within(dialog).getByLabelText(/^Summary/), 'New one')
   await userEvent.type(within(dialog).getByLabelText(/^Description/), 'd')
   await userEvent.type(within(dialog).getByLabelText(/^Done when/), 'w')
+  await userEvent.type(within(dialog).getByLabelText(/^Question for you/), 'Go?')
+  await userEvent.type(within(dialog).getByLabelText(/^How to answer/), 'Reply')
   await userEvent.click(within(dialog).getByRole('button', { name: 'Create task' }))
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   expect(posts(f).map((p) => p.url)).toEqual(['/api/projects/DEMO/tasks'])
