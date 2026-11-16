@@ -196,52 +196,178 @@ async def _shown_tasks(repo, project_key, now):
     return [t for t in tasks if t["task"]["epic_id"] not in hidden]
 
 
+# --- Needs you: every row carries its question (docs/design-needs-you-questions.md) ---
+
+ASK_ORDER = ("decide", "review", "release", "confirm", "later")
+FOLD = "release"  # resolve_ask's answer for merged-not-live work: no row of its own
+NO_QUESTION = "No question recorded yet."
+ASK_AGENT = "Ask your agent about this task:"
+REPLY = "Reply to your agent:"
+
+
+def _ask(kind, question, answer_how, reply_code, *, auto=True, missing=False, url=None) -> dict:
+    return {"ask_kind": kind, "question": question, "answer_how": answer_how, "reply_code": reply_code,
+            "auto": auto, "missing_question": missing, "url": url}
+
+
+def _missing(ref) -> dict:
+    return _ask("decide", NO_QUESTION, ASK_AGENT, f"{ref}?", missing=True)
+
+
+def _pr_name(external_id: str) -> str:
+    """`owner/repo#7` -> `repo#7`."""
+    repo, _, n = external_id.rpartition("#")
+    return f"{repo.rsplit('/', 1)[-1]}#{n}"
+
+
+def _computed(task, items, flags):
+    """Rules 2-8 for one task: a stored question, else the standard question; FOLD for merged-not-live
+    work; None when nothing here waits on the human."""
+    if task.get("question"):
+        return _ask(task.get("ask_kind") or "decide", task["question"], task.get("answer_how"),
+                    task.get("reply_code"), auto=False)
+    if "awaiting_confirmation" in flags:
+        return _ask("confirm", "The agent says this is done. Is it?",
+                    "Press Confirm done, or tell your agent what is missing.", None)
+    if "merged_not_live" in flags:
+        return FOLD
+    links = live_links(items)
+    if "blocked_needs_input" in flags:
+        card = next((i for i in links if i["source"] == "kanban" and effective_category(i) == "blocked"
+                     and i.get("blocked_reason") == "needs_input"), None)
+        if card:
+            cid = card["external_id"]
+            return _ask("decide", f"What should card {cid} do next?",
+                        "Read the block reason on the card, then reply to your agent:", f"{cid}: <answer>",
+                        url=card.get("url"))
+    human = _human(task.get("waiting_on"))
+    if human:
+        prs = [i for i in links if i["source"] == "github" and link_state(i) == "open"]
+        prs.sort(key=lambda i: not _human(i.get("waiting_on")))
+        if prs:
+            name = _pr_name(prs[0]["external_id"])
+            return _ask("review", f"Merge PR {name}?", REPLY, f"merge {name}", url=prs[0].get("url"))
+        card = next((i for i in links if i["source"] == "kanban" and effective_category(i) == "review"), None)
+        if card:
+            cid = card["external_id"]
+            return _ask("review", f"Approve card {cid}?", REPLY, f"push {cid}", url=card.get("url"))
+    if human or "blocked_needs_input" in flags:
+        return _missing(task["key"])
+    return None
+
+
+def resolve_ask(task: dict, items: list[dict], flags: list[str], now: int):
+    """The ask of one open task row, first match wins (rules 1-8): an ask dict, FOLD, or None.
+    A task whose ask is not due yet stays under Later and out of its project's Release row."""
+    nb = task.get("not_before")
+    if nb is not None and nb > now:
+        a = _computed(task, items, [f for f in flags if f != "merged_not_live"])
+        if a is None:
+            if "merged_not_live" not in flags:
+                return None
+            a = _missing(task["key"])
+        return {**a, "ask_kind": "later"}
+    return _computed(task, items, flags)
+
+
+def _merged_links(items) -> list[dict]:
+    out = [i for i in live_links(items) if i.get("merged_at") and not i.get("live_at")]
+    return sorted(out, key=lambda i: (i["merged_at"], i["id"]))
+
+
+def release_ask(name: str, project_key: str) -> dict:
+    return _ask("release", f"Release {name} to its live branch?", REPLY, f"release {project_key.lower()}")
+
+
+def release_rows(folded: list[dict], names: dict[str, str]) -> list[dict]:
+    """One Release row per project over its folded tasks (load_tasks rows): their merged-not-live links,
+    oldest first."""
+    by_project: dict[str, list[dict]] = {}
+    pids: dict[str, int] = {}
+    for row in folded:
+        pk = row["task"]["project_key"]
+        pids[pk] = row["task"]["project_id"]
+        by_project.setdefault(pk, []).extend(_merged_links(row["items"]))
+    out = []
+    for pk, links in by_project.items():
+        if not links:
+            continue
+        links.sort(key=lambda i: (i["merged_at"], i["id"]))
+        name = names.get(pk, pk)
+        a = release_ask(name, pk)
+        out.append({
+            "kind": "release", "id": pids[pk], "ref": f"release:{pk}",
+            "title": f"{name}: {len(links)} changes merged, not live",
+            "project_key": pk, "epic_key": None, "url": None, "waiting_on": links[0].get("waiting_on"),
+            "waiting_since": links[0]["merged_at"], "reasons": ["merged, not live"],
+            **{k: v for k, v in a.items() if k != "url"},
+            "context": ", ".join(i["title"] for i in links),
+            "items": [{"ref": item_ref(i), "title": i["title"], "url": i["url"], "project_key": pk} for i in links],
+        })
+    return out
+
+
+def _task_reasons(t, d) -> list[str]:
+    reasons = []
+    if _human(t["waiting_on"]):
+        reasons.append("waiting on you")
+    if "awaiting_confirmation" in d.flags:
+        reasons.append("awaiting your confirmation")
+    if "merged_not_live" in d.flags:
+        reasons.append("merged, not live")
+    if "blocked_needs_input" in d.flags:
+        reasons.append("blocked: needs your input")
+    return reasons
+
+
+async def _project_names(repo) -> dict[str, str]:
+    return {p["key"]: p["name"] for p in await repo.query("select key, name from projects")}
+
+
 async def needs_you(repo, *, now, project_key=None) -> list[dict]:
+    """Rows waiting on the human, each with its question (rules in docs/api.md), grouped by answer kind
+    (ASK_ORDER), oldest first inside each group. Epic rows only for an epic's own human wait."""
     rows = []
     for row in await load_epics(repo, project_key=project_key):
         e, items = row["epic"], row["items"]
         d = _derive(row, now)
-        if d.hidden or d.board_column in ("done", "canceled"):
+        if d.hidden or d.board_column in ("done", "canceled") or not _human(e["waiting_on"]):
             continue
-        reasons = []
-        if _human(e["waiting_on"]):
-            reasons.append("waiting on you")
+        reasons = ["waiting on you"]
         if "awaiting_approval" in d.flags:
             reasons.append("awaiting your approval")
-        if "awaiting_confirmation" in d.flags:
-            reasons.append("awaiting your confirmation")
-        if "merged_not_live" in d.flags:
-            reasons.append("merged, not live")
-        if "blocked_needs_input" in d.flags:
-            reasons.append("blocked: needs your input")
-        if d.review_owner == "human":
-            reasons.append("review · you")
-        if reasons:
-            rows.append({"kind": "epic", "id": e["id"], "ref": e["key"], "title": e["title"],
-                         "waiting_on": e["waiting_on"],
-                         "waiting_since": _waiting_since(e, items, row["tasks"]),
-                         "reasons": reasons})
+        a = (_ask("decide", e["question"], e["answer_how"], e["reply_code"], auto=False) if e.get("question")
+             else _missing(e["key"]))
+        rows.append({"kind": "epic", "id": e["id"], "ref": e["key"], "title": e["title"],
+                     "project_key": e["project_key"], "epic_key": e["key"], "url": None,
+                     "waiting_on": e["waiting_on"], "waiting_since": _waiting_since(e, items, row["tasks"]),
+                     "reasons": reasons, **{k: v for k, v in a.items() if k != "url"},
+                     "context": e["goal"], "items": None})
     th = await thresholds(repo)
+    folded = []
     for row in await _shown_tasks(repo, project_key, now):
         t, d = row["task"], row["derived"]
         if d.status not in OPEN_TASK:
             continue
-        reasons = []
-        if _human(t["waiting_on"]):
-            reasons.append("waiting on you")
-        if "awaiting_confirmation" in d.flags:
-            reasons.append("awaiting your confirmation")
-        if t["epic_id"] is None:  # an epic's row already carries these for its tasks
-            if "merged_not_live" in d.flags:
-                reasons.append("merged, not live")
-            if "blocked_needs_input" in d.flags:
-                reasons.append("blocked: needs your input")
-        if reasons:
-            v = _view(row, now, th)
-            rows.append({"kind": "task", "id": t["id"], "ref": t["key"], "title": t["summary"],
-                         "epic_key": t["epic_key"], "waiting_on": t["waiting_on"],
-                         "waiting_since": v["waiting_since"], "reasons": reasons})
-    return sorted(rows, key=lambda r: (r["waiting_since"], r["kind"], r["id"]))
+        reasons = _task_reasons(t, d)
+        if not reasons:
+            continue
+        a = resolve_ask(t, row["items"], d.flags, now)
+        if a == FOLD:
+            folded.append(row)
+            continue
+        if a is None:
+            continue
+        v = _view(row, now, th)
+        rows.append({"kind": "task", "id": t["id"], "ref": t["key"], "title": t["summary"],
+                     "project_key": t["project_key"], "epic_key": t["epic_key"], "url": a["url"],
+                     "waiting_on": t["waiting_on"], "waiting_since": v["waiting_since"], "reasons": reasons,
+                     **{k: v for k, v in a.items() if k != "url"}, "context": t["description"], "items": None})
+    if folded:
+        rows += release_rows(folded, await _project_names(repo))
+    kinds = ("epic", "task", "release")
+    return sorted(rows, key=lambda r: (ASK_ORDER.index(r["ask_kind"]), r["waiting_since"],
+                                       kinds.index(r["kind"]), r["id"]))
 
 
 async def stalled(repo, *, now, waiting_on=None, project_key=None) -> list[dict]:
@@ -350,6 +476,10 @@ async def task_detail(repo, *, key, now):
     out["merged_into"] = t["merged_into_key"]
     out["created_at"], out["updated_at"] = t["created_at"], t["updated_at"]
     out["done_confirmed_at"] = t["done_confirmed_at"]
+    out.update({k: t[k] for k in ("question", "answer_how", "reply_code", "ask_kind", "not_before")})
+    epic = await repo.first("select next_step from epics where id = ?", (t["epic_id"],)) if t["epic_id"] else None
+    out["epic_next_step"] = epic and epic["next_step"]
+    out["ask"] = await _detail_ask(repo, row, now)
     out["links"] = [_link_entry(i, now, th) for i in row["items"]]
     events = await repo.query(
         "select * from events where (subject_type='task' and subject_id=?) "
@@ -357,6 +487,19 @@ async def task_detail(repo, *, key, now):
         "order by at desc, id desc limit 50", (t["id"], t["id"]))
     out["events"] = _events(events)
     return out
+
+
+async def _detail_ask(repo, row, now):
+    """The task's Needs you ask as its row shows it (a folded task gets its project's Release ask);
+    None when the task is not waiting on the human."""
+    t, d = row["task"], row["derived"]
+    if d.status not in OPEN_TASK or not _task_reasons(t, d):
+        return None
+    a = resolve_ask(t, row["items"], d.flags, now)
+    if a == FOLD:
+        p = await repo.first("select name from projects where key = ?", (t["project_key"],))
+        a = release_ask(p["name"], t["project_key"])
+    return a and {k: v for k, v in a.items() if k != "url"}
 
 
 async def task_card(repo, *, key, now):

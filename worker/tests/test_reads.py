@@ -135,12 +135,11 @@ async def test_board_stalled_flag_matches_stall_rule(repo):
     assert col(await reads.board(repo, now=NOW + 1), "in_progress")["cards"][0]["stalled"] is True
 
 
-async def test_needs_you_oldest_first_with_reasons(repo):
+async def test_needs_you_groups_by_answer_kind_oldest_first(repo):
     e1 = await mk_epic(repo, key="DEMO-E1", title="late", waiting_on="human:owner", last=NOW - 10)
     e2 = await mk_epic(repo, key="DEMO-E2", title="old", last=NOW - 500)
     await mk_item(repo, "1", e2, "review", waiting_on="human:owner", last=NOW - 500)
-    e3 = await mk_epic(repo, key="DEMO-E3", title="spec", stage="spec", waiting_on="human:owner",
-                       last=NOW - 100)
+    await mk_epic(repo, key="DEMO-E3", title="spec", stage="spec", waiting_on="human:owner", last=NOW - 100)
     e4 = await mk_epic(repo, key="DEMO-E4", title="agent")
     await mk_item(repo, "4", e4, "in_progress")
     e5 = await mk_epic(repo, key="DEMO-E5", title="blk", last=NOW - 700)
@@ -148,17 +147,163 @@ async def test_needs_you_oldest_first_with_reasons(repo):
     e6 = await mk_epic(repo, key="DEMO-E6", title="merged", last=NOW - 50)
     await mk_item(repo, "6", e6, "review", waiting_on="agent:a", merged=NOW - 60, last=NOW - 50)
     rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["ask_kind"], r["kind"], r["ref"]) for r in rows] == [
+        ("decide", "task", "DEMO-3"), ("decide", "epic", "DEMO-E3"), ("decide", "epic", "DEMO-E1"),
+        ("review", "task", "DEMO-1"), ("release", "release", "release:DEMO")]
     by = {r["ref"]: r for r in rows}
-    assert [r["ref"] for r in rows if r["kind"] == "epic"] == ["DEMO-E5", "DEMO-E2", "DEMO-E3", "DEMO-E6", "DEMO-E1"]
-    # the tasks waiting on a human are listed too (one task per item here)
-    assert [(r["ref"], r["epic_key"], r["reasons"]) for r in rows if r["kind"] == "task"] == [
-        ("DEMO-3", "DEMO-E5", ["waiting on you"]), ("DEMO-1", "DEMO-E2", ["waiting on you"])]
-    assert "DEMO-E4" not in by
-    assert by["DEMO-E2"]["reasons"] == ["review · you"]
-    assert by["DEMO-E3"]["reasons"] == ["waiting on you", "awaiting your approval"]
-    assert by["DEMO-E5"]["reasons"] == ["blocked: needs your input"]
-    assert by["DEMO-E6"]["reasons"] == ["merged, not live"]
-    assert by["DEMO-E1"]["kind"] == "epic" and by["DEMO-E1"]["id"] == e1
+    assert by["DEMO-E1"]["id"] == e1 and by["DEMO-E3"]["reasons"] == ["waiting on you", "awaiting your approval"]
+    assert by["DEMO-3"]["reasons"] == ["waiting on you", "blocked: needs your input"]
+    assert by["DEMO-1"]["reasons"] == ["waiting on you"]
+    for r in rows:
+        assert set(r) == ROW_KEYS, r["ref"]
+
+
+ROW_KEYS = {"kind", "id", "ref", "title", "project_key", "epic_key", "url", "waiting_on", "waiting_since", "reasons",
+            "ask_kind", "question", "answer_how", "reply_code", "context", "auto", "missing_question", "items"}
+
+
+async def ask(repo, key, **fields):
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    await repo.execute(f"update tasks set {sets} where key = ?", (*fields.values(), key))
+
+
+def pick(row, *keys):
+    return tuple(row[k] for k in keys)
+
+
+ASK = ("ask_kind", "question", "answer_how", "reply_code", "auto", "missing_question")
+
+
+async def test_rule_confirm_when_agent_says_done(repo):
+    e = await mk_epic(repo, waiting_on="agent:a")
+    await mk_task(repo, epic_id=e, summary="said done", status="done")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, *ASK) == ("confirm", "The agent says this is done. Is it?",
+                             "Press Confirm done, or tell your agent what is missing.", None, True, False)
+    assert (r["context"], r["items"], r["project_key"], r["epic_key"]) == ("d", None, "DEMO", "DEMO-E1")
+
+
+async def test_rule_blocked_card_asks_what_next(repo):
+    i = await mk_item(repo, "t_demo1", None, "blocked", filing="standalone", waiting_on="human:owner",
+                      reason="needs_input")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert r["ref"] == await task_key(repo, i)
+    assert pick(r, *ASK) == ("decide", "What should card t_demo1 do next?",
+                             "Read the block reason on the card, then reply to your agent:", "t_demo1: <answer>",
+                             True, False)
+
+
+async def test_rule_open_pr_asks_merge(repo):
+    t = await mk_task(repo, summary="pr", waiting_on="human:owner")
+    await mk_item(repo, "owner/sample#7", None, "review", source="github", waiting_on="human:owner", task_id=t,
+                  filing="standalone", project_id=1)
+    await repo.execute("update items set url = 'https://example.test/pr/7'")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, *ASK) == ("review", "Merge PR sample#7?", "Reply to your agent:", "merge sample#7", True, False)
+    assert r["url"] == "https://example.test/pr/7"
+
+
+async def test_rule_card_in_review_asks_approve(repo):
+    await mk_item(repo, "t_demo2", None, "review", filing="standalone", waiting_on="human:owner")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, *ASK) == ("review", "Approve card t_demo2?", "Reply to your agent:", "push t_demo2", True, False)
+
+
+async def test_rule_no_question_recorded(repo):
+    await mk_task(repo, summary="ask me", waiting_on="human:owner")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, *ASK) == ("decide", "No question recorded yet.", "Ask your agent about this task:", "DEMO-1?",
+                             True, True)
+
+
+async def test_stored_question_wins(repo):
+    t = await mk_task(repo, summary="pr", waiting_on="human:owner")
+    await mk_item(repo, "owner/sample#7", None, "review", source="github", waiting_on="human:owner", task_id=t,
+                  filing="standalone", project_id=1)
+    await ask(repo, "DEMO-1", question="Ship the sample now?", answer_how="Reply:", reply_code="ship", ask_kind="review")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, *ASK) == ("review", "Ship the sample now?", "Reply:", "ship", False, False)
+    await ask(repo, "DEMO-1", ask_kind=None, reply_code=None)
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert pick(r, "ask_kind", "reply_code") == ("decide", None)
+
+
+async def test_not_before_moves_to_later(repo):
+    await mk_task(repo, summary="later", waiting_on="human:owner", last=NOW - 900)
+    await mk_task(repo, summary="now", waiting_on="human:owner", last=NOW - 10)
+    await ask(repo, "DEMO-1", question="Go?", answer_how="Reply:", not_before=NOW + DAY)
+    await ask(repo, "DEMO-2", question="Now?", answer_how="Reply:", not_before=NOW - DAY)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [pick(r, "ref", "ask_kind", "question") for r in rows] == [
+        ("DEMO-2", "decide", "Now?"), ("DEMO-1", "later", "Go?")]
+    await ask(repo, "DEMO-1", question=None, answer_how=None)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert pick(rows[-1], "ask_kind", "question", "missing_question") == ("later", "No question recorded yet.", True)
+
+
+async def test_release_row_folds_merged_not_live(repo):
+    await repo.execute("insert into projects(key,name,created_at) values('DEMO','Demo app',1)")
+    e = await mk_epic(repo, waiting_on="agent:a")
+    await mk_item(repo, "owner/sample#1", e, "review", source="github", merged=NOW - 300, last=NOW - 300,
+                  title="first change")
+    await mk_item(repo, "owner/sample#2", e, "review", source="github", merged=NOW - 100, last=NOW - 100,
+                  title="second change")
+    await mk_item(repo, "owner/sample#3", e, "review", source="github", merged=NOW - 50, live=NOW - 40)
+    await repo.execute("update items set url = 'https://example.test/pr/' || id")
+    await mk_epic(repo, key="SAMPLE-E1", project="SAMPLE", waiting_on="agent:a")
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [r["kind"] for r in rows] == ["release"]
+    [r] = rows
+    assert pick(r, "ref", "title", "project_key", "epic_key", "waiting_since", "reasons") == (
+        "release:DEMO", "Demo app: 2 changes merged, not live", "DEMO", None, NOW - 300, ["merged, not live"])
+    assert pick(r, *ASK) == ("release", "Release Demo app to its live branch?", "Reply to your agent:",
+                             "release demo", True, False)
+    assert r["items"] == [
+        {"ref": "github:owner/sample#1", "title": "first change", "url": "https://example.test/pr/1",
+         "project_key": "DEMO"},
+        {"ref": "github:owner/sample#2", "title": "second change", "url": "https://example.test/pr/2",
+         "project_key": "DEMO"}]
+    # filtered to another project: no release row
+    assert await reads.needs_you(repo, now=NOW, project_key="SAMPLE") == []
+
+
+async def test_epic_rows_only_for_own_human_wait(repo):
+    e = await mk_epic(repo, waiting_on="agent:a")
+    await mk_task(repo, epic_id=e, summary="said done", status="done", last=NOW - 30)
+    await mk_epic(repo, key="DEMO-E2", waiting_on="human:owner", last=NOW - 20)
+    await repo.execute("update epics set question='Approve the spec?', answer_how='Reply:', reply_code='ok E2', "
+                       "goal='Demo goal.' where key='DEMO-E2'")
+    await mk_epic(repo, key="DEMO-E3", waiting_on="human:owner", last=NOW - 10)
+    await mk_epic(repo, key="DEMO-E4", waiting_on="human:owner", manual="canceled", board="canceled")
+    e5 = await mk_epic(repo, key="DEMO-E5", waiting_on="human:owner", confirmed=NOW - 5)
+    await mk_task(repo, epic_id=e5, status="done", confirmed=NOW - 5)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["kind"], r["ref"]) for r in rows] == [("epic", "DEMO-E2"), ("epic", "DEMO-E3"), ("task", "DEMO-1")]
+    by = {r["ref"]: r for r in rows}
+    assert pick(by["DEMO-E2"], *ASK) == ("decide", "Approve the spec?", "Reply:", "ok E2", False, False)
+    assert by["DEMO-E2"]["context"] == "Demo goal."
+    assert pick(by["DEMO-E3"], *ASK) == ("decide", "No question recorded yet.", "Ask your agent about this task:",
+                                         "DEMO-E3?", True, True)
+
+
+async def test_task_detail_carries_ask_and_epic_next_step(repo):
+    e = await mk_epic(repo, waiting_on="agent:a")
+    await repo.execute("update epics set next_step = 'Write the plan.' where id = ?", (e,))
+    await mk_task(repo, epic_id=e, summary="ask", waiting_on="human:owner")
+    await ask(repo, "DEMO-1", question="Go?", answer_how="Reply:", reply_code="go", ask_kind="decide",
+              not_before=NOW - 5)
+    d = await reads.task_detail(repo, key="DEMO-1", now=NOW)
+    assert pick(d, "question", "answer_how", "reply_code", "ask_kind", "not_before", "epic_next_step") == (
+        "Go?", "Reply:", "go", "decide", NOW - 5, "Write the plan.")
+    assert pick(d["ask"], *ASK) == ("decide", "Go?", "Reply:", "go", False, False)
+    await mk_task(repo, summary="agent work")
+    d = await reads.task_detail(repo, key="DEMO-2", now=NOW)
+    assert (d["ask"], d["epic_next_step"], d["question"]) == (None, None, None)
+    await mk_item(repo, "owner/sample#9", None, "review", source="github", merged=NOW - 9, filing="standalone",
+                  project_id=1)
+    d = await reads.task_detail(repo, key="DEMO-3", now=NOW)
+    assert pick(d["ask"], "ask_kind", "question", "reply_code") == (
+        "release", "Release DEMO to its live branch?", "release demo")
 
 
 async def test_needs_you_includes_no_epic_task_waiting_on_human(repo):

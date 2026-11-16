@@ -70,10 +70,42 @@ than 7 days are hidden. `goal` (the description) is null on epics created before
 
 ### GET /api/needs-you
 
-Query: `project` (key). Open epics waiting on a human, awaiting approval or confirmation, merged
-but not live, blocked on input or in review by a human (`kind: "epic"`), and open tasks waiting on
-a human or awaiting your confirmation (`kind: "task"`, with `epic_key`; a task with no epic also
-lists merged, not live and blocked on input). Oldest first. With `project`, only that project. 200.
+Query: `project` (key). What waits on the human, each row with its question
+(docs/design-needs-you-questions.md). 200. Every row:
+`{kind: "task"|"epic"|"release", id, ref, title, project_key, epic_key, url, waiting_on, waiting_since,
+reasons, ask_kind: "decide"|"review"|"release"|"confirm"|"later", question, answer_how, reply_code,
+context, auto, missing_question, items}`. `context` is the task description or epic goal, unchanged
+(a Release row lists its items' titles). `auto` is true when the question was computed rather than
+stored; `missing_question` only for the "no question recorded" fallback. `items` is null except on
+`release` rows: `[{ref, title, url, project_key}]` of the merged-not-live links, oldest first.
+`reasons` (`waiting on you`, `awaiting your approval`, `awaiting your confirmation`,
+`merged, not live`, `blocked: needs your input`) stays for older clients.
+
+Task rows: open tasks waiting on a human, awaiting confirmation, merged but not live, or blocked on
+input. The ask, first match wins:
+1. `not_before` in the future → `later` (question as below; merged-not-live work is not folded);
+2. a stored `question` → its `ask_kind` (default `decide`), `answer_how`, `reply_code`;
+3. awaiting confirmation → `confirm`, `The agent says this is done. Is it?`,
+   `Press Confirm done, or tell your agent what is missing.`, no reply code;
+4. merged into a non-live branch → no row of its own: folded into the project's Release row;
+5. blocked on input with a linked Kanban card `<id>` → `decide`, `What should card <id> do next?`,
+   `Read the block reason on the card, then reply to your agent:`, reply `<id>: <answer>`;
+6. a linked open GitHub PR `<owner>/<repo>#<n>` and the task waits on a human → `review`,
+   `Merge PR <repo>#<n>?`, `Reply to your agent:`, reply `merge <repo>#<n>`;
+7. a linked Kanban card in review and the task waits on a human → `review`, `Approve card <id>?`,
+   `Reply to your agent:`, reply `push <id>`;
+8. otherwise → `decide`, `No question recorded yet.`, `Ask your agent about this task:`, reply
+   `<KEY>?`, `missing_question: true`.
+
+Release rows: one per project with folded work, `ref` `release:<PROJECT_KEY>`, title
+`<Project name>: N changes merged, not live`, question `Release <Project name> to its live branch?`,
+`Reply to your agent:`, reply `release <project key lowercased>`, `waiting_since` the oldest merge.
+
+Epic rows: only an open epic whose own `waiting_on` is a human, with its stored question or the
+rule 8 wording (reply `<EPIC_KEY>?`). Task-derived reasons show once, on the task.
+
+Order: groups decide, review, release, confirm, later; oldest `waiting_since` first in each. With
+`project`, only that project.
 
 ### GET /api/stalled
 
@@ -121,6 +153,10 @@ project.
 ### GET /api/tasks/{key}
 
 A task card plus `merged_into` (key or null), `done_confirmed_at`, `created_at`, `updated_at`,
+the stored ask fields `question, answer_how, reply_code, ask_kind, not_before`, `epic_next_step`
+(the epic's next step, or null), `ask` (the task's Needs you ask as its row shows it:
+`{ask_kind, question, answer_how, reply_code, auto, missing_question}`, a folded task gets its
+project's Release ask; null when nothing waits on the human),
 `links` (linked items: `id, ref, source, external_id, title, url, status_category, category,
 owner, waiting_on, next_step, last_activity_at, merged_at, live_at, filing, stalled`) and the
 newest 50 `events` of the task and its linked items. 200, 404 unknown task.
@@ -145,7 +181,10 @@ key exists.
 ### POST /api/projects/{project_key}/epics
 
 Body: `{"title", "goal", "stage"? (idea|spec|plan|build|review|ship), "owner"?, "next_step"?,
-"waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled)}`. URL fields accept only `http://` or `https://` (else 422).
+"waiting_on", "home_url"?, "spec_url"?, "plan_url"?, "manual_column"? (backlog|todo|canceled),
+"question"? (max 300), "answer_how"? (max 200), "reply_code"? (max 80)}`. URL fields accept only `http://` or `https://` (else 422).
+Ask fields are stripped and blank counts as missing. An epic whose `waiting_on` is `human:…` needs
+`question` and `answer_how`: 422 `An epic waiting on a human needs a question and how to answer.`
 `goal` is the epic's description (shown as "Description" in the UI): required, at most 2000
 characters, stored stripped; missing, null, empty or whitespace-only is 422.
 `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`) is required unless
@@ -157,7 +196,9 @@ project from 1. 201, 404 unknown project.
 Body: any of the epic fields above; null is rejected for fields that cannot be null and an empty
 body is 422. `goal` cannot be set to null, empty or whitespace-only (422); a given `goal` is stored stripped.
 `waiting_on` cannot be set to null, and a canceled epic cannot be reopened without
-one, unless the epic stays canceled (422). 200, 404 unknown epic. Agents never set a column other than backlog, todo or canceled.
+one, unless the epic stays canceled (422). A patch that sets `waiting_on` to a human or touches
+`question`/`answer_how` must leave a human-waiting epic with both (422 with the message above);
+other patches to older epics without a question still work. 200, 404 unknown epic. Agents never set a column other than backlog, todo or canceled.
 
 ### POST /api/epics/{key}/confirm-done
 
@@ -206,15 +247,23 @@ touches.
 
 Body: `{"summary" (1-300), "description" (max 2000), "done_when" (max 300), "owner" (max 100),
 "waiting_on", "type"? (task|bug, default task), "priority"? (high|medium|low, default medium),
-"epic_key"?, "refs"? (up to 10 keys like `OPS-8001`), "item_id"?}`. Strings are stripped; a blank
-required field is 422. `epic_key` must be an epic of the project (422; 404 unknown). With
+"epic_key"?, "refs"? (up to 10 keys like `OPS-8001`), "item_id"?, "question"? (max 300),
+"answer_how"? (max 200), "reply_code"? (max 80, the exact text the Copy button copies), "ask_kind"?
+(decide|review|release|confirm, default decide when a question is set), "not_before"? (epoch
+seconds; the ask shows under Later until then)}`. Strings are stripped; a blank
+required field is 422; a blank ask field counts as missing. A task whose `waiting_on` is
+`human:…` needs `question` and `answer_how`: 422
+`A task waiting on a human needs a question and how to answer.` Tasks made by ingest or filing
+are exempt; Needs you gives them a standard question. `epic_key` must be an epic of the project (422; 404 unknown). With
 `item_id` the item is linked to the new task. The status starts at `todo`; the reporter is the
 caller. 201, 404 unknown project or item, 409 if a concurrent create took the key.
 
 ### PATCH /api/tasks/{key}
 
 Body: any of `summary, description, done_when, owner, waiting_on, type, priority, refs, epic_key`
-(`epic_key: null` moves the task to No epic; its linked items follow). Null is 422 for fields that
+and the ask fields (`epic_key: null` moves the task to No epic; its linked items follow). A patch
+that sets `waiting_on` to a human or touches `question`/`answer_how` must leave a human-waiting
+task with both (422 with the message above); other patches to older tasks still work. Null is 422 for fields that
 cannot be null; `waiting_on` cannot be null while the task is open; an empty body is 422.
 200, 404 unknown task or epic.
 
