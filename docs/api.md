@@ -81,13 +81,17 @@ stored; `missing_question` only for the "no question recorded" fallback. `items`
 `reasons` (`waiting on you`, `awaiting your approval`, `awaiting your confirmation`,
 `merged, not live`, `blocked: needs your input`) stays for older clients.
 
-Task rows: open tasks waiting on a human, awaiting confirmation, merged but not live, or blocked on
-input. The ask, first match wins:
-1. `not_before` in the future → `later` (question as below; merged-not-live work is not folded);
+Merged-not-live work always folds: every open task's links merged into a non-live branch are
+items of its project's Release row, whether or not the task also has a row of its own and whatever
+its `not_before`.
+
+Task rows: open tasks waiting on a human, awaiting confirmation, blocked on input, or merged but
+not live (the last only with an own ask, e.g. a stored question). The task's own ask ignores its merged-not-live links and flag; first match wins:
+1. `not_before` in the future → `later` (question as below; only the task's own row moves);
 2. a stored `question` → its `ask_kind` (default `decide`), `answer_how`, `reply_code`;
 3. awaiting confirmation → `confirm`, `The agent says this is done. Is it?`,
    `Press Confirm done, or tell your agent what is missing.`, no reply code;
-4. merged into a non-live branch → no row of its own: folded into the project's Release row;
+4. (merged-not-live work: never the task's own ask; it folds into the Release row, above);
 5. blocked on input with a linked Kanban card `<id>` → `decide`, `What should card <id> do next?`,
    `Read the block reason on the card, then reply to your agent:`, reply `<id>: <answer>`;
 6. a linked open GitHub PR `<owner>/<repo>#<n>` and the task waits on a human → `review`,
@@ -95,11 +99,14 @@ input. The ask, first match wins:
 7. a linked Kanban card in review and the task waits on a human → `review`, `Approve card <id>?`,
    `Reply to your agent:`, reply `push <id>`;
 8. otherwise → `decide`, `No question recorded yet.`, `Ask your agent about this task:`, reply
-   `<KEY>?`, `missing_question: true`.
+   `<KEY>?`, `missing_question: true`. A task whose only open work is merged-not-live links gets
+   no rule 8 row: the Release row covers it.
 
-Release rows: one per project with folded work, `ref` `release:<PROJECT_KEY>`, title
-`<Project name>: N changes merged, not live`, question `Release <Project name> to its live branch?`,
-`Reply to your agent:`, reply `release <project key lowercased>`, `waiting_since` the oldest merge.
+Release rows: one per project with merged-not-live links on open tasks; `id` is the project id,
+`ref` `release:<PROJECT_KEY>`, title `<Project name>: 1 change merged, not live` or
+`<Project name>: N changes merged, not live` (N ≥ 2), question
+`Release <Project name> to its live branch?`, `Reply to your agent:`, reply
+`release <project key lowercased>`, `waiting_on` null, `waiting_since` the oldest merge.
 
 Epic rows: only an open epic whose own `waiting_on` is a human, with its stored question or the
 rule 8 wording (reply `<EPIC_KEY>?`). Task-derived reasons show once, on the task.
@@ -154,9 +161,9 @@ project.
 
 A task card plus `merged_into` (key or null), `done_confirmed_at`, `created_at`, `updated_at`,
 the stored ask fields `question, answer_how, reply_code, ask_kind, not_before`, `epic_next_step`
-(the epic's next step, or null), `ask` (the task's Needs you ask as its row shows it:
-`{ask_kind, question, answer_how, reply_code, auto, missing_question}`, a folded task gets its
-project's Release ask; null when nothing waits on the human),
+(the epic's next step, or null), `ask` (the task's own Needs you ask as its row shows it:
+`{ask_kind, question, answer_how, reply_code, auto, missing_question}`; a task with no own row whose
+merged-not-live work folds gets its project's Release ask; null when nothing waits on the human),
 `links` (linked items: `id, ref, source, external_id, title, url, status_category, category,
 owner, waiting_on, next_step, last_activity_at, merged_at, live_at, filing, stalled`) and the
 newest 50 `events` of the task and its linked items. 200, 404 unknown task.

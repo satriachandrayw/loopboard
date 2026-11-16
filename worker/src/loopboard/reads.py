@@ -199,7 +199,6 @@ async def _shown_tasks(repo, project_key, now):
 # --- Needs you: every row carries its question (docs/design-needs-you-questions.md) ---
 
 ASK_ORDER = ("decide", "review", "release", "confirm", "later")
-FOLD = "release"  # resolve_ask's answer for merged-not-live work: no row of its own
 NO_QUESTION = "No question recorded yet."
 ASK_AGENT = "Ask your agent about this task:"
 REPLY = "Reply to your agent:"
@@ -221,16 +220,15 @@ def _pr_name(external_id: str) -> str:
 
 
 def _computed(task, items, flags):
-    """Rules 2-8 for one task: a stored question, else the standard question; FOLD for merged-not-live
-    work; None when nothing here waits on the human."""
+    """Rules 2-3, 5-8 for one task over its links other than merged-not-live ones (those always fold
+    into the Release row): a stored question, else the standard question; None when nothing here
+    waits on the human."""
     if task.get("question"):
         return _ask(task.get("ask_kind") or "decide", task["question"], task.get("answer_how"),
                     task.get("reply_code"), auto=False)
     if "awaiting_confirmation" in flags:
         return _ask("confirm", "The agent says this is done. Is it?",
                     "Press Confirm done, or tell your agent what is missing.", None)
-    if "merged_not_live" in flags:
-        return FOLD
     links = live_links(items)
     if "blocked_needs_input" in flags:
         card = next((i for i in links if i["source"] == "kanban" and effective_category(i) == "blocked"
@@ -256,49 +254,57 @@ def _computed(task, items, flags):
     return None
 
 
-def resolve_ask(task: dict, items: list[dict], flags: list[str], now: int):
-    """The ask of one open task row, first match wins (rules 1-8): an ask dict, FOLD, or None.
-    A task whose ask is not due yet stays under Later and out of its project's Release row."""
-    nb = task.get("not_before")
-    if nb is not None and nb > now:
-        a = _computed(task, items, [f for f in flags if f != "merged_not_live"])
-        if a is None:
-            if "merged_not_live" not in flags:
-                return None
-            a = _missing(task["key"])
-        return {**a, "ask_kind": "later"}
-    return _computed(task, items, flags)
+def _merged(i) -> bool:
+    return bool(i.get("merged_at")) and not i.get("live_at")
 
 
 def _merged_links(items) -> list[dict]:
-    out = [i for i in live_links(items) if i.get("merged_at") and not i.get("live_at")]
+    out = [i for i in live_links(items) if _merged(i)]
     return sorted(out, key=lambda i: (i["merged_at"], i["id"]))
+
+
+def resolve_ask(task: dict, items: list[dict], flags: list[str], now: int):
+    """The task's own ask (rules 1-3, 5-8), or None when it gets no row of its own. Merged-not-live
+    links are left out: they always fold into the project's Release row (rule 4). The "no question
+    recorded" fallback is dropped when merged-not-live links are the task's only open work, since
+    the Release row covers it. `not_before` in the future only moves the own row to Later."""
+    rest = [i for i in items if not _merged(i)]
+    a = _computed(task, rest, [f for f in flags if f != "merged_not_live"])
+    if a is not None and a["missing_question"] and _merged_links(items):
+        if not any(effective_category(i) not in ("done", "canceled") for i in live_links(rest)):
+            a = None
+    nb = task.get("not_before")
+    if a is not None and nb is not None and nb > now:
+        a = {**a, "ask_kind": "later"}
+    return a
 
 
 def release_ask(name: str, project_key: str) -> dict:
     return _ask("release", f"Release {name} to its live branch?", REPLY, f"release {project_key.lower()}")
 
 
-def release_rows(folded: list[dict], names: dict[str, str]) -> list[dict]:
-    """One Release row per project over its folded tasks (load_tasks rows): their merged-not-live links,
-    oldest first."""
+def release_rows(tasks: list[dict], names: dict[str, str]) -> list[dict]:
+    """One Release row per project over the merged-not-live links of its open tasks (load_tasks
+    rows), oldest first. `id` is the project id."""
     by_project: dict[str, list[dict]] = {}
     pids: dict[str, int] = {}
-    for row in folded:
-        pk = row["task"]["project_key"]
-        pids[pk] = row["task"]["project_id"]
-        by_project.setdefault(pk, []).extend(_merged_links(row["items"]))
-    out = []
-    for pk, links in by_project.items():
+    for row in tasks:
+        links = _merged_links(row["items"])
         if not links:
             continue
+        pk = row["task"]["project_key"]
+        pids[pk] = row["task"]["project_id"]
+        by_project.setdefault(pk, []).extend(links)
+    out = []
+    for pk, links in by_project.items():
         links.sort(key=lambda i: (i["merged_at"], i["id"]))
         name = names.get(pk, pk)
+        n = len(links)
         a = release_ask(name, pk)
         out.append({
             "kind": "release", "id": pids[pk], "ref": f"release:{pk}",
-            "title": f"{name}: {len(links)} changes merged, not live",
-            "project_key": pk, "epic_key": None, "url": None, "waiting_on": links[0].get("waiting_on"),
+            "title": f"{name}: {n} {'change' if n == 1 else 'changes'} merged, not live",
+            "project_key": pk, "epic_key": None, "url": None, "waiting_on": None,
             "waiting_since": links[0]["merged_at"], "reasons": ["merged, not live"],
             **{k: v for k, v in a.items() if k != "url"},
             "context": ", ".join(i["title"] for i in links),
@@ -344,18 +350,16 @@ async def needs_you(repo, *, now, project_key=None) -> list[dict]:
                      "reasons": reasons, **{k: v for k, v in a.items() if k != "url"},
                      "context": e["goal"], "items": None})
     th = await thresholds(repo)
-    folded = []
+    open_tasks = []
     for row in await _shown_tasks(repo, project_key, now):
         t, d = row["task"], row["derived"]
         if d.status not in OPEN_TASK:
             continue
+        open_tasks.append(row)
         reasons = _task_reasons(t, d)
         if not reasons:
             continue
         a = resolve_ask(t, row["items"], d.flags, now)
-        if a == FOLD:
-            folded.append(row)
-            continue
         if a is None:
             continue
         v = _view(row, now, th)
@@ -363,8 +367,7 @@ async def needs_you(repo, *, now, project_key=None) -> list[dict]:
                      "project_key": t["project_key"], "epic_key": t["epic_key"], "url": a["url"],
                      "waiting_on": t["waiting_on"], "waiting_since": v["waiting_since"], "reasons": reasons,
                      **{k: v for k, v in a.items() if k != "url"}, "context": t["description"], "items": None})
-    if folded:
-        rows += release_rows(folded, await _project_names(repo))
+    rows += release_rows(open_tasks, await _project_names(repo))
     kinds = ("epic", "task", "release")
     return sorted(rows, key=lambda r: (ASK_ORDER.index(r["ask_kind"]), r["waiting_since"],
                                        kinds.index(r["kind"]), r["id"]))
@@ -490,13 +493,13 @@ async def task_detail(repo, *, key, now):
 
 
 async def _detail_ask(repo, row, now):
-    """The task's Needs you ask as its row shows it (a folded task gets its project's Release ask);
-    None when the task is not waiting on the human."""
+    """The task's own Needs you ask as its row shows it; a task whose only ask is its merged-not-live
+    work gets its project's Release ask; None when nothing waits on the human."""
     t, d = row["task"], row["derived"]
-    if d.status not in OPEN_TASK or not _task_reasons(t, d):
+    if d.status not in OPEN_TASK:
         return None
-    a = resolve_ask(t, row["items"], d.flags, now)
-    if a == FOLD:
+    a = resolve_ask(t, row["items"], d.flags, now) if _task_reasons(t, d) else None
+    if a is None and _merged_links(row["items"]):
         p = await repo.first("select name from projects where key = ?", (t["project_key"],))
         a = release_ask(p["name"], t["project_key"])
     return a and {k: v for k, v in a.items() if k != "url"}

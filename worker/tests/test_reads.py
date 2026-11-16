@@ -256,6 +256,7 @@ async def test_release_row_folds_merged_not_live(repo):
     [r] = rows
     assert pick(r, "ref", "title", "project_key", "epic_key", "waiting_since", "reasons") == (
         "release:DEMO", "Demo app: 2 changes merged, not live", "DEMO", None, NOW - 300, ["merged, not live"])
+    assert (r["waiting_on"], r["id"]) == (None, 1)
     assert pick(r, *ASK) == ("release", "Release Demo app to its live branch?", "Reply to your agent:",
                              "release demo", True, False)
     assert r["items"] == [
@@ -265,6 +266,68 @@ async def test_release_row_folds_merged_not_live(repo):
          "project_key": "DEMO"}]
     # filtered to another project: no release row
     assert await reads.needs_you(repo, now=NOW, project_key="SAMPLE") == []
+
+
+async def _merged_pr(repo, ext, task_id, project_id=1, at=NOW - 200):
+    return await mk_item(repo, ext, None, "review", source="github", merged=at, last=at, task_id=task_id,
+                         filing="standalone", project_id=project_id, title=f"merged {ext}")
+
+
+async def test_merged_and_open_pr_gives_review_row_and_release_item(repo):
+    t = await mk_task(repo, summary="pr", waiting_on="human:owner")
+    await _merged_pr(repo, "owner/sample#1", t)
+    await mk_item(repo, "owner/sample#2", None, "review", source="github", waiting_on="human:owner", task_id=t,
+                  filing="standalone", project_id=1)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["kind"], r["ref"], r["ask_kind"]) for r in rows] == [
+        ("task", "DEMO-1", "review"), ("release", "release:DEMO", "release")]
+    assert rows[0]["question"] == "Merge PR sample#2?"
+    assert [i["ref"] for i in rows[1]["items"]] == ["github:owner/sample#1"]
+
+
+async def test_stored_question_and_merged_gives_own_row_and_release_item(repo):
+    t = await mk_task(repo, summary="ask", waiting_on="human:owner")
+    await _merged_pr(repo, "owner/sample#1", t)
+    await ask(repo, "DEMO-1", question="Ship it?", answer_how="Reply:")
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["kind"], r["ask_kind"], r["question"]) for r in rows] == [
+        ("task", "decide", "Ship it?"), ("release", "release", "Release DEMO to its live branch?")]
+    assert rows[1]["title"] == "DEMO: 1 change merged, not live"
+
+
+async def test_merged_only_human_task_without_question_is_covered_by_release(repo):
+    t = await mk_task(repo, summary="merged", waiting_on="human:owner")
+    await _merged_pr(repo, "owner/sample#1", t)
+    assert [r["kind"] for r in await reads.needs_you(repo, now=NOW)] == ["release"]
+    d = await reads.task_detail(repo, key="DEMO-1", now=NOW)
+    assert d["ask"]["ask_kind"] == "release"
+
+
+async def test_not_before_with_merged_only_folds_into_release_no_later_row(repo):
+    t = await mk_task(repo, summary="later", waiting_on="human:owner")
+    await _merged_pr(repo, "owner/sample#1", t)
+    await ask(repo, "DEMO-1", not_before=NOW + DAY)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["kind"], r["ask_kind"]) for r in rows] == [("release", "release")]
+    assert [i["ref"] for i in rows[0]["items"]] == ["github:owner/sample#1"]
+    # with its own question the task moves to Later; its merged work still folds into Release
+    await ask(repo, "DEMO-1", question="Go?", answer_how="Reply:")
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["kind"], r["ask_kind"]) for r in rows] == [("release", "release"), ("task", "later")]
+
+
+async def test_two_projects_two_release_rows(repo):
+    t1 = await mk_task(repo, summary="a")
+    await _merged_pr(repo, "owner/sample#1", t1, at=NOW - 300)
+    await _merged_pr(repo, "owner/sample#2", t1, at=NOW - 250)
+    pid = await repo.execute("insert into projects(key,name,created_at) values('SAMPLE','Sample app',1)")
+    t2 = await mk_task(repo, project_id=pid, summary="b")
+    await _merged_pr(repo, "owner/other#3", t2, project_id=pid, at=NOW - 100)
+    rows = await reads.needs_you(repo, now=NOW)
+    assert [(r["ref"], r["id"], r["title"], r["waiting_on"]) for r in rows] == [
+        ("release:DEMO", 1, "DEMO: 2 changes merged, not live", None),
+        ("release:SAMPLE", pid, "Sample app: 1 change merged, not live", None)]
+    assert [r["ref"] for r in await reads.needs_you(repo, now=NOW, project_key="SAMPLE")] == ["release:SAMPLE"]
 
 
 async def test_epic_rows_only_for_own_human_wait(repo):
