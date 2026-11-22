@@ -76,6 +76,11 @@ class ItemIn(BaseModel):
     last_activity_at: str
     merged_at: str | None = None
     live_at: str | None = None
+    # An item that is itself a question for the human (asks connector): ingest gives a new open one
+    # its own standalone task carrying these (docs/api.md).
+    question: str | None = Field(default=None, min_length=1, max_length=300)
+    answer_how: str | None = Field(default=None, max_length=200)
+    reply_code: str | None = Field(default=None, max_length=40)
 
     _url = field_validator("url")(_http_url)
 
@@ -90,6 +95,8 @@ class ItemIn(BaseModel):
     def _waiting(self):
         if self.status_category in OPEN_CATEGORIES and not self.waiting_on:
             raise ValidationError("waiting_on is required on open items")
+        if self.question is not None and not self.project_key:
+            raise ValidationError("an item with a question needs a project_key")
         return self
 
 

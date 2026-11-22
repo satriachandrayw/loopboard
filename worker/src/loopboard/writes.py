@@ -291,20 +291,24 @@ def item_origin(item: dict) -> str:
     return item.get("url") or f"{item['source']}:{item['external_id']}"
 
 
-def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now, via="api") -> list:
-    """Insert a task made from an item (epic tag, filing) and its task.created event. The item is
-    found by (source, external_id), so it may be inserted later in the same batch."""
+def auto_task_stmts(item: dict, *, project_id, epic_id, seq, key, actor, now, via="api", ask=None) -> list:
+    """Insert a task made from an item (epic tag, filing, ask) and its task.created event. The item is
+    found by (source, external_id), so it may be inserted later in the same batch. `ask` sets the
+    task's question, answer_how, reply_code and ask_kind."""
+    ask = ask or {}
     owner = ((item.get("owner") or "").strip() or item["source"])[:100]
     summary = item["title"].strip()[:300] or key
     payload = {"key": key, "project_id": project_id, "epic_id": epic_id, "summary": summary,
-               "origin": item_origin(item)}
+               "origin": item_origin(item), **ask}
     return [
         ("insert into tasks(project_id, epic_id, seq, key, type, summary, description, done_when, status, "
-         "priority, owner, waiting_on, reporter, refs, origin_item_id, last_activity_at, created_at, updated_at) "
+         "priority, owner, waiting_on, reporter, refs, origin_item_id, last_activity_at, created_at, updated_at"
+         ", question, answer_how, reply_code, ask_kind) "
          "values (?, ?, ?, ?, 'task', ?, ?, ?, 'todo', 'medium', ?, ?, ?, '[]', "
-         "(select id from items where source = ? and external_id = ?), ?, ?, ?)",
+         "(select id from items where source = ? and external_id = ?), ?, ?, ?, ?, ?, ?, ?)",
          (project_id, epic_id, seq, key, summary, f"Created from {item_origin(item)}", AUTO_DONE_WHEN, owner,
-          item.get("waiting_on") or f"source:{item['source']}", actor, item["source"], item["external_id"], now, now, now)),
+          item.get("waiting_on") or f"source:{item['source']}", actor, item["source"], item["external_id"], now, now, now,
+          *(ask.get(c) for c in ("question", "answer_how", "reply_code", "ask_kind")))),
         ("insert into events(at, actor, via, subject_type, subject_id, kind, payload) "
          "select ?, ?, ?, 'task', id, 'task.created', ? from tasks where key = ?",
          (now, actor, via, json.dumps(payload), key)),

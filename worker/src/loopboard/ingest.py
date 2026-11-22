@@ -9,11 +9,14 @@ A new or unfiled item is linked, in this order, to the task its `task_key` names
 task resolves to its survivor), to the open task of its project whose ref appears in its title as
 a whole token, or to a new task made under the epic its `epic_key` names. Unknown keys are counted,
 never an error.
+
+An item with a `question` (an ask) skips that linking: a new open one gets its own standalone task
+carrying the question, a new closed one is filed `ignored`, and a known one is only upserted.
 """
 import json
 import re
 
-from .model import MERGE_DEPTH, ItemIn, ValidationError, parse_ts
+from .model import MERGE_DEPTH, OPEN_CATEGORIES, ItemIn, ValidationError, parse_ts
 from .recompute import _qs, chunks, recompute_epics
 from .writes import auto_task_stmts
 
@@ -140,7 +143,7 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
 
     out = {"accepted": len(items), "created": 0, "updated": 0, "skipped_older": 0,
            "unknown_epic": sum(1 for it in items if it.epic_key and it.epic_key not in epics),
-           "linked_task": 0, "auto_tasks": 0,
+           "linked_task": 0, "auto_tasks": 0, "ask_tasks": 0,
            "unknown_task": sum(1 for it in items if it.task_key and it.task_key not in tasks)}
     touched: set[int] = set()
     stmts: list = []
@@ -159,7 +162,10 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
                 new[k] = parse_ts(getattr(it, k))
         # A tag or ref files only a new or unfiled item; an epic, standalone or ignored filing (set
         # by a human or Hermes) is never overwritten by one.
-        eligible = stored is None or stored["filing"] == "unfiled"
+        # An ask's text often names another tracker's key: it is never linked by key, ref or tag.
+        asked = it.question is not None
+        eligible = (stored is None or stored["filing"] == "unfiled") and not asked
+        ask_task = asked and stored is None and it.status_category in OPEN_CATEGORIES
         keeps_project = stored is not None and stored["filing"] in ("epic", "standalone")
         if it.project_key and not keeps_project:
             new["project_id"] = projects[it.project_key]["id"]
@@ -176,23 +182,31 @@ async def _ingest_once(repo, *, source: str, items: list[ItemIn], actor: str, vi
             new.update(task_id=task["id"], project_id=task["project_id"], epic_id=task["epic_id"],
                        filing="epic" if task["epic_id"] else "standalone")
             out["linked_task"] += 1
-        elif epic is not None:
-            pid = epic["project_id"]
+        elif epic is not None or ask_task:
+            if epic is not None:
+                pid, epic_id, ask = epic["project_id"], epic["id"], None
+                prefix = epic_keys_by_id[epic["id"]].rsplit("-E", 1)[0]
+            else:
+                pid, epic_id, prefix = projects[it.project_key]["id"], None, it.project_key
+                ask = {"question": it.question, "answer_how": it.answer_how, "reply_code": it.reply_code,
+                       "ask_kind": "decide"}
             seqs[pid] = seqs.get(pid, 0) + 1
-            task_key = f"{epic_keys_by_id[epic['id']].rsplit('-E', 1)[0]}-{seqs[pid]}"
+            task_key = f"{prefix}-{seqs[pid]}"
             src = {"source": source, "external_id": it.external_id, "title": it.title, "url": it.url,
                    "owner": it.owner, "waiting_on": it.waiting_on}
-            pre = auto_task_stmts(src, project_id=pid, epic_id=epic["id"], seq=seqs[pid], key=task_key,
-                                  actor=actor, now=now, via=via)
-            new.update(project_id=pid, epic_id=epic["id"], filing="epic")
+            pre = auto_task_stmts(src, project_id=pid, epic_id=epic_id, seq=seqs[pid], key=task_key,
+                                  actor=actor, now=now, via=via, ask=ask)
+            new.update(project_id=pid, epic_id=epic_id, filing="epic" if epic_id else "standalone")
             post = [
                 ("update items set task_id = (select id from tasks where key = ?) where source = ? "
                  "and external_id = ? and last_activity_at <= ?", (task_key, source, it.external_id, ts)),
                 ("update tasks set origin_item_id = (select id from items where source = ? and external_id = ?) "
                  "where key = ? and origin_item_id is null", (source, it.external_id, task_key)),
             ]
-            out["auto_tasks"] += 1
-        linked = task is not None or epic is not None
+            out["ask_tasks" if ask else "auto_tasks"] += 1
+        elif asked and stored is None:
+            new["filing"] = "ignored"  # an ask already closed when first seen needs no task
+        linked = task is not None or epic is not None or ask_task
 
         if stored is None:
             new.setdefault("filing", "unfiled")

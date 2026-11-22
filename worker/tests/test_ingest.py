@@ -666,3 +666,129 @@ async def test_auto_task_from_item_without_waiting_on_waits_on_source(make_app, 
     assert r.json()["auto_tasks"] == 1
     task = await repo.first("select waiting_on from tasks where key='DEMO-1'")
     assert task["waiting_on"] == "source:kanban"
+
+
+# --- asks: items that carry their own question ---
+
+ASK_HOW = "Reply to your agent in chat with the code and your answer."
+
+
+def ask(**over):
+    d = item(external_id="D-1", title="Ship the demo on Friday?", project_key="DEMO",
+             waiting_on="human:owner", question="Ship the demo on Friday?", answer_how=ASK_HOW,
+             reply_code="D-1")
+    d.update(over)
+    return d
+
+
+async def mk_project(repo, pkey="DEMO"):
+    return await repo.execute("insert into projects(key,name,created_at) values (?,?,1)", (pkey, pkey))
+
+
+async def test_new_open_ask_gets_its_own_standalone_task(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    pid = await mk_project(repo)
+    r = await post(client_for, app, t, [ask()], source="asks")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["ask_tasks"], body["auto_tasks"], body["linked_task"], body["created"]) == (1, 0, 0, 1)
+    task = await repo.first("select * from tasks")
+    assert (task["key"], task["project_id"], task["epic_id"], task["summary"]) == (
+        "DEMO-1", pid, None, "Ship the demo on Friday?")
+    assert (task["question"], task["answer_how"], task["reply_code"], task["ask_kind"]) == (
+        "Ship the demo on Friday?", ASK_HOW, "D-1", "decide")
+    assert (task["waiting_on"], task["owner"], task["status"]) == ("human:owner", "asks", "todo")
+    x = await row(repo, "D-1")
+    assert (x["filing"], x["task_id"], x["project_id"], x["epic_id"]) == ("standalone", task["id"], pid, None)
+    assert task["origin_item_id"] == x["id"]
+    ev = await repo.query("select kind from events where subject_type='task'")
+    assert [e["kind"] for e in ev] == ["task.created"]
+
+
+async def test_ask_task_owner_is_the_items_owner_when_given(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    await post(client_for, app, t, [ask(owner="hermes")], source="asks")
+    assert (await repo.first("select owner from tasks"))["owner"] == "hermes"
+
+
+async def test_reingesting_an_ask_makes_no_second_task(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    await post(client_for, app, t, [ask()], source="asks")
+    r = await post(client_for, app, t, [ask()], source="asks")
+    assert r.json()["ask_tasks"] == 0
+    r = await post(client_for, app, t, [ask(last_activity_at=T2, question="Ship it on Monday instead?",
+                                            title="Ship it on Monday instead?")], source="asks")
+    assert (r.json()["ask_tasks"], r.json()["updated"]) == (0, 1)
+    [task] = await repo.query("select * from tasks")
+    assert task["question"] == "Ship the demo on Friday?"
+    assert (await row(repo, "D-1"))["title"] == "Ship it on Monday instead?"
+
+
+async def test_ask_mentioning_an_open_tasks_ref_is_not_linked_to_it(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    other = await mk_task(repo, key="DEMO-1", refs='["OPS-8001"]')
+    await mk_epic(repo, "DEMO-E1")
+    r = await post(client_for, app, t, [ask(title="Merge OPS-8001 and DEMO-1 now?", task_key="DEMO-1",
+                                            epic_key="DEMO-E1")], source="asks")
+    assert (r.json()["linked_task"], r.json()["auto_tasks"], r.json()["ask_tasks"]) == (0, 0, 1)
+    x = await row(repo, "D-1")
+    assert x["task_id"] != other and x["filing"] == "standalone" and x["epic_id"] is None
+    assert (await repo.first("select key from tasks where id=?", (x["task_id"],)))["key"] == "DEMO-2"
+
+
+async def test_new_ask_that_is_already_closed_is_ignored(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    r = await post(client_for, app, t, [ask(status_category="done", waiting_on=None),
+                                        ask(external_id="D-2", status_category="canceled", waiting_on=None)],
+                   source="asks")
+    assert (r.json()["ask_tasks"], r.json()["created"]) == (0, 2)
+    assert await repo.query("select id from tasks") == []
+    for ext in ("D-1", "D-2"):
+        x = await row(repo, ext)
+        assert (x["filing"], x["task_id"]) == ("ignored", None)
+
+
+async def test_ask_without_project_key_is_refused(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    r = await post(client_for, app, t, [ask(external_id="D-2"), ask(project_key=None)], source="asks")
+    assert r.status_code == 422
+    assert await repo.query("select id from items") == []
+
+
+async def test_ask_fields_have_limits(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    for bad in (dict(question=""), dict(question="q" * 301), dict(answer_how="a" * 201),
+                dict(reply_code="r" * 41)):
+        r = await post(client_for, app, t, [ask(**bad)], source="asks")
+        assert r.status_code == 422, bad
+    r = await post(client_for, app, t, [ask(question="q" * 300, answer_how="a" * 200, reply_code="r" * 40)],
+                   source="asks")
+    assert r.status_code == 200
+
+
+async def test_items_without_question_still_link_and_report_zero_ask_tasks(make_app, client_for):
+    app, repo, t = await setup(make_app, client_for)
+    hit = await mk_task(repo, key="DEMO-1", refs='["OPS-8001"]')
+    r = await post(client_for, app, t, [item(title="fix(OPS-8001): retry", project_key="DEMO")])
+    assert (r.json()["linked_task"], r.json()["ask_tasks"]) == (1, 0)
+    assert (await row(repo))["task_id"] == hit
+
+
+async def test_open_ask_shows_on_needs_you_until_it_arrives_done(make_app, client_for):
+    from loopboard import reads
+    app, repo, t = await setup(make_app, client_for, source="asks")
+    await mk_project(repo)
+    await post(client_for, app, t, [ask()], source="asks")
+    [r] = await reads.needs_you(repo, now=NOW)
+    assert (r["kind"], r["ref"], r["ask_kind"], r["question"], r["reply_code"], r["answer_how"]) == (
+        "task", "DEMO-1", "decide", "Ship the demo on Friday?", "D-1", ASK_HOW)
+    assert r["missing_question"] is False
+    await post(client_for, app, t, [ask(status_category="done", waiting_on=None, last_activity_at=T2)],
+               source="asks")
+    assert await reads.needs_you(repo, now=NOW) == []
+    assert (await repo.query("select id from tasks")).__len__() == 1
