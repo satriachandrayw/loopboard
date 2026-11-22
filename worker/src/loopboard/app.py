@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from fastapi import FastAPI, Request
@@ -97,24 +98,34 @@ async def fetch_certs(team_domain: str) -> dict:
 
 async def get_jwks(request: Request, refresh: bool = False) -> dict:
     """kid -> JWK, cached on app.state. Fetches when empty or on refresh, at most
-    once per 60 s (app clock). Any fetch/parse failure is an AuthError (401)."""
+    once per 60 s (app clock). Any fetch/parse failure is an AuthError (401).
+
+    Concurrent callers queue on one lock, so requests arriving on a cold isolate
+    while the first fetch is in flight wait for its result instead of reading
+    the still-empty table through the throttle (which answered them 401)."""
     state = request.app.state
     if state.jwks and not refresh:
         return state.jwks
     access = get_access(request)
     if access is None:
         return state.jwks
-    now = get_now(request)
-    last = getattr(state, "jwks_attempt_at", None)
-    if last is not None and now - last < JWKS_REFETCH_SECONDS:
-        return state.jwks
-    state.jwks_attempt_at = now
-    fetch = getattr(state, "fetch_certs", None) or fetch_certs
-    try:
-        table = await fetch(access.team_domain)
-        if not isinstance(table, dict):
-            raise AuthError("bad certs")
-    except Exception as e:
-        raise AuthError("certs unavailable") from e
-    state.jwks = table
-    return table
+    lock = getattr(state, "jwks_lock", None)
+    if lock is None:
+        lock = state.jwks_lock = asyncio.Lock()
+    async with lock:
+        if state.jwks and not refresh:
+            return state.jwks  # filled by the fetch we waited on
+        now = get_now(request)
+        last = getattr(state, "jwks_attempt_at", None)
+        if last is not None and now - last < JWKS_REFETCH_SECONDS:
+            return state.jwks
+        state.jwks_attempt_at = now
+        fetch = getattr(state, "fetch_certs", None) or fetch_certs
+        try:
+            table = await fetch(access.team_domain)
+            if not isinstance(table, dict):
+                raise AuthError("bad certs")
+        except Exception as e:
+            raise AuthError("certs unavailable") from e
+        state.jwks = table
+        return table

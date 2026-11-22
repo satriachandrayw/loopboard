@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import subprocess
@@ -250,6 +251,25 @@ async def test_jwks_fetched_when_empty(make_app, client_for):
         r = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
         r2 = await c.get("/api/health", headers={"Cf-Access-Jwt-Assertion": sign(claims())})
     assert (r.status_code, r2.status_code) == (200, 200)
+    assert calls == [ACCESS.team_domain]
+
+
+async def test_concurrent_cold_requests_share_one_jwks_fetch(make_app, client_for):
+    # A cold isolate gets several requests at once (the page loads its screen and
+    # nav badges together). Waiters must reuse the in-flight fetch, not hit the
+    # refetch throttle with an empty key table and answer 401.
+    calls = []
+
+    async def slow_fetch(team):
+        calls.append(team)
+        await asyncio.sleep(0.05)
+        return {"k1": jwk_of(KEY)}
+
+    app, _ = make_app(access=ACCESS, verify_sig=rsa_verify, clock=lambda: NOW, fetch_certs=slow_fetch)
+    h = {"Cf-Access-Jwt-Assertion": sign(claims())}
+    async with client_for(app) as c:
+        rs = await asyncio.gather(*[c.get("/api/health", headers=h) for _ in range(4)])
+    assert [r.status_code for r in rs] == [200] * 4
     assert calls == [ACCESS.team_domain]
 
 
