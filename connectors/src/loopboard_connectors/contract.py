@@ -59,11 +59,16 @@ class Item:
     merged_at: str | None = None
     live_at: str | None = None
     task_key: str | None = None
+    # Ask fields (asks connector). Omitted from the payload when None, so other connectors' payloads
+    # are unchanged and still accepted by a Worker that predates them.
+    question: str | None = None
+    answer_how: str | None = None
+    reply_code: str | None = None
 
     def to_payload(self) -> dict:
         d = asdict(self)
         d.pop("source")
-        for k in ("epic_key", "task_key"):
+        for k in ("epic_key", "task_key", "question", "answer_how", "reply_code"):
             if d[k] is None:
                 del d[k]
         return d

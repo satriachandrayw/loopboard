@@ -9,7 +9,7 @@ from .contract import IngestRejected, SourceError
 
 CHUNK = 100
 COUNTS = ("accepted", "created", "updated", "skipped_older", "unknown_epic", "linked_task", "auto_tasks",
-          "unknown_task")
+          "unknown_task", "ask_tasks")
 # A real User-Agent: Cloudflare's Browser Integrity Check rejects the default Python-urllib one (error 1010).
 USER_AGENT = f"loopboard-connectors/{__version__} (+https://github.com/satriachandrayw/loopboard)"
 

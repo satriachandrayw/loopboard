@@ -25,3 +25,11 @@ builder-bot = "builder"
 
 [github.live_branches]       # PRs merged into these base branches count as live
 "owner/app" = ["main"]
+
+[asks]
+file = "asks.json"           # asks file written by your assistant; relative paths are from this config
+# source = "asks"            # ingest source name (bind the ingest token to it)
+default_project = "DEMO"     # project key for asks whose project is empty or not in [asks.projects]
+
+[asks.projects]              # project name -> Loopboard project key; names match ignoring case, spaces, - and _
+"demo app" = "DEMO"

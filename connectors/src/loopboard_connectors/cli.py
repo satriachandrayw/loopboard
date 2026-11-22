@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
+from pathlib import Path
 
-from . import github, kanban
+from . import asks, github, kanban
 from .client import COUNTS, IngestClient
 from .config import check_url, load_config, resolve_token
 from .contract import ConfigError, IngestRejected, SourceError
@@ -123,6 +125,64 @@ def _sync_github(args, env, post, fetch_json, now) -> int:
     return 0
 
 
+_SOURCE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+_PROJECT = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
+
+
+def _asks_config(cfg: dict, config_path) -> tuple[Path, str, dict, str]:
+    acfg = cfg.get("asks", {})
+    file = acfg.get("file")
+    if not isinstance(file, str) or not file:
+        raise ConfigError("[asks] file is not set")
+    path = Path(file).expanduser()
+    if not path.is_absolute():
+        path = Path(config_path).parent / path
+    source = acfg.get("source", "asks")
+    if not isinstance(source, str) or not _SOURCE.match(source):
+        raise ConfigError("[asks] source must look like a source name (lowercase, 2-32 chars)")
+    default = acfg.get("default_project")
+    if not isinstance(default, str) or not _PROJECT.match(default):
+        raise ConfigError("[asks] default_project must be a project key")
+    projects = acfg.get("projects", {})
+    if not isinstance(projects, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) and _PROJECT.match(v) for k, v in projects.items()):
+        raise ConfigError("[asks.projects] values must be project keys")
+    return path, source, projects, default
+
+
+def _sync_asks(args, env, post) -> int:
+    try:
+        cfg = load_config(args.config)
+        url = cfg.get("loopboard", {}).get("url")
+        if not url:
+            raise ConfigError("[loopboard] url is not set")
+        check_url(url)
+        token = None if args.dry_run else resolve_token(cfg, env)
+        path, source, projects, default = _asks_config(cfg, args.config)
+    except ConfigError as e:
+        _emit({"connector": "asks", "error": str(e)})
+        return 2
+    human = cfg.get("general", {}).get("human", "owner")
+    try:
+        items = asks.collect(path, source=source, human=human, projects=projects, default_project=default)
+    except SourceError as e:
+        _emit({"connector": "asks", "error": str(e)})
+        return 1
+    totals = {k: 0 for k in COUNTS}
+    posts = 0
+    if items and not args.dry_run:
+        client = IngestClient(url, token, post=post)
+        try:
+            totals = client.send(source, items)
+        except IngestRejected as e:
+            _emit({"connector": "asks", "error": f"ingest rejected (HTTP {e.status})"})
+            return 3
+        posts = client.posts
+    _emit({"connector": "asks", "collected": len(items), **totals, "posts": posts,
+           "dry_run": bool(args.dry_run)})
+    return 0
+
+
 def main(argv=None, *, env=os.environ, post=None, run_cli=None, fetch_json=None, now=None) -> int:
     p = argparse.ArgumentParser(prog="loopboard")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -135,7 +195,12 @@ def main(argv=None, *, env=os.environ, post=None, run_cli=None, fetch_json=None,
     g = sp.add_parser("github")
     g.add_argument("--config", required=True)
     g.add_argument("--dry-run", action="store_true")
+    a = sp.add_parser("asks")
+    a.add_argument("--config", required=True)
+    a.add_argument("--dry-run", action="store_true")
     args = p.parse_args(sys.argv[1:] if argv is None else argv)
+    if args.connector == "asks":
+        return _sync_asks(args, env, post)
     if args.connector == "github":
         return _sync_github(args, env, post, fetch_json, now)
     return _sync_kanban(args, env, post, run_cli)
