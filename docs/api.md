@@ -28,8 +28,9 @@ Body: `{"source": "kanban", "items": [Item, ...]}`, at most 100 items. `source` 
 (`backlog|todo|in_progress|blocked|review|done|canceled`), `last_activity_at`, and optionally
 `url` (http:// or https:// only), `raw_status`, `owner`, `waiting_on` (`agent:<name>`, `human:<name>` or `source:<name>`;
 required on open items), `blocked_reason` (`needs_input|other`), `next_step`, `project_key`,
-`epic_key`, `task_key` (`^[A-Z][A-Z0-9]{1,9}-[0-9]+$`), `merged_at`, `live_at`. Absent keys leave
-the item's filing unchanged.
+`epic_key`, `task_key` (`^[A-Z][A-Z0-9]{1,9}-[0-9]+$`), `merged_at`, `live_at`, `question`
+(1–300 chars), `answer_how` (≤ 200) and `reply_code` (≤ 40). Absent keys leave the item's filing
+unchanged. An item with `question` must have a `project_key`, otherwise the request is 422.
 
 Only a new item or one stored as `unfiled` is linked to a task, in this order: `task_key` names a
 task (a merged-away task resolves to its survivor); else a ref of an open task of the item's
@@ -43,10 +44,27 @@ An unknown or canceled epic or task is not an error: the item is ingested as if 
 items land in `unfiled`), it is counted in `unknown_epic` or `unknown_task`, and the rest of the
 request still commits. An unknown `project_key` is still 422 for the whole request.
 
+An item with a `question` is an ask (for example from the [asks connector](connectors.md#asks-file))
+and skips the linking above: its text often names another tracker's key, and it must not be linked
+to that task.
+
+- A new ask in an open category gets its own standalone task (no epic) in its project, and the item
+  is filed to it (`filing` `standalone`). The task's summary is the item title; `question`,
+  `answer_how` and `reply_code` come from the item and `ask_kind` is `decide`; `waiting_on` is the
+  item's, and owner is the item's owner or else the source name. A `task.created` event is written.
+  The task shows on Needs you as a `decide` row with that question and reply code.
+- A new ask that is already `done` or `canceled` is stored with `filing` `ignored` and no task.
+- A known ask is upserted as usual: it never gets a second task, and its task's question fields are
+  not rewritten. When it later arrives `done`, its task derives `done` from the link and leaves
+  Needs you.
+
+Items without `question` behave as before. Deploy the Worker before a connector sends `question`,
+`answer_how` or `reply_code`: an older Worker refuses unknown item fields (`extra="forbid"`, 422).
+
 Response 200: `{"accepted","created","updated","skipped_older","unknown_epic","linked_task",
-"auto_tasks","unknown_task"}`. `unknown_epic` / `unknown_task` count the items whose key was
+"auto_tasks","unknown_task","ask_tasks"}`. `unknown_epic` / `unknown_task` count the items whose key was
 unknown or canceled, `linked_task` the items linked by key or ref, `auto_tasks` the tasks made
-from epic keys (each 0 when none). Ingest is idempotent; a
+from epic keys, `ask_tasks` the tasks made for new open asks (each 0 when none). Ingest is idempotent; a
 payload older than the stored `last_activity_at` is skipped. 403 if the token is bound to another source or is an ingest token bound to no source.
 See [connectors.md](connectors.md).
 

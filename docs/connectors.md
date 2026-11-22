@@ -10,12 +10,14 @@ A connector reads one external source and pushes its items to Loopboard through
   unparseable output or missing field fails the whole run and nothing is posted.
 - Map: each source record becomes an `Item` (`source`, `external_id`, `title`, `url`,
   `status_category`, `raw_status`, `owner`, `waiting_on`, `blocked_reason`, `next_step`,
-  `project_key`, `epic_key`, `task_key`, `last_activity_at`, `merged_at`, `live_at`).
+  `project_key`, `epic_key`, `task_key`, `last_activity_at`, `merged_at`, `live_at`, and for asks
+  `question`, `answer_how`, `reply_code`).
 - `last_activity_at` is the newest activity timestamp the source offers, as ISO 8601 with `Z`
   or an offset. Ingest skips a payload older than the stored value.
 - Upsert-only: a listing never cancels, unfiles or deletes an item that is absent from it.
   A non-zero exit or unparseable output posts nothing.
-- Free text (bodies, comments, summaries, block reasons) is never read or sent.
+- Free text (bodies, comments, summaries, block reasons) is never read or sent. The one exception
+  is the asks file, whose question text is the point of the connector.
 
 ## Ingest payload
 
@@ -27,9 +29,10 @@ A connector reads one external source and pushes its items to Loopboard through
 ```
 
 At most 100 items per request; the runner splits larger listings. `epic_key` and `task_key` are
-omitted when unset so ingest keeps any existing filing. Open items need `waiting_on` of the form
+omitted when unset so ingest keeps any existing filing; `question`, `answer_how` and `reply_code`
+are omitted when unset, so Kanban and GitHub payloads are unchanged. Open items need `waiting_on` of the form
 `agent:<name>`, `human:<name>` or `source:<name>`. The response is
-`{"accepted","created","updated","skipped_older","unknown_epic","linked_task","auto_tasks","unknown_task"}`.
+`{"accepted","created","updated","skipped_older","unknown_epic","linked_task","auto_tasks","unknown_task","ask_tasks"}`.
 A token bound to another source gets 403.
 
 ## Linking by title prefix and refs
@@ -125,15 +128,67 @@ API budget: per repo, one listing call per page, plus check-runs and reviews (ea
 
 Requests send `User-Agent: loopboard-connectors/<version>`, since Cloudflare's Browser Integrity Check rejects the default `Python-urllib` agent (error 1010). Titles are cut at 300 characters.
 
+## Asks file
+
+```
+loopboard sync asks --config PATH [--dry-run]
+```
+
+Reads one JSON file (path from `[asks] file`), written by the owner's assistant, listing the
+decisions agents are waiting on the human for. Each ask has a short code the human answers with in
+chat; Loopboard only shows it. The connector never writes the file.
+
+```json
+{"asks": [{"code": "D-1", "question": "Ship the demo on Friday?", "project": "demo app",
+  "status": "open", "updated_at": 1763700000, "url": null}]}
+```
+
+- `code`: non-empty string, at most 40 characters.
+- `question`: non-empty string.
+- `project`: string (may be empty) or null.
+- `status`: `open`, `answered`, `resolved`, `expired` or `dropped`.
+- `updated_at`: epoch seconds (a number).
+- `url`: optional; null or an `http://` / `https://` URL.
+
+A missing field, a bad type or status, or an unparseable file fails the whole run and posts nothing.
+
+| Item field | Value |
+|---|---|
+| `source` | `[asks] source` (default `asks`) |
+| `external_id`, `reply_code` | `code` |
+| `title`, `question` | `question`, trimmed and cut to 300 characters |
+| `answer_how` | `Reply to your agent in chat with the code and your answer.` |
+| `status_category` | `todo` for `open`; `done` for any other status |
+| `waiting_on` | `human:<general.human>` for `open`; null otherwise |
+| `raw_status` | `status` |
+| `owner`, `next_step`, `epic_key`, `task_key` | null / unset |
+| `url` | `url` |
+| `project_key` | from `[asks.projects]` (below), else `[asks] default_project` |
+| `last_activity_at` | `updated_at` as ISO 8601 `Z` |
+
+Project map: `[asks.projects]` maps a project name to a project key. Names are compared after
+normalising both sides: lowercase, with spaces, `-` and `_` removed, so `"Cek Mitra"` matches
+`cekmitra`. An empty or unmatched name gets `[asks] default_project` (required).
+
+Ingest gives each new open ask its own standalone task, which shows on Needs you as a `decide` row
+with the question and reply code; when the ask closes, its task derives `done` and the row goes.
+See `POST /api/ingest` in [api.md](api.md). Bind the ingest token to the asks source name. The
+Loopboard token comes from the variable named by `[loopboard] token_env` and is never printed;
+listings over 100 asks are posted in batches of 100.
+
+Deploy the Worker first: a Worker that predates the ask fields refuses them (`extra="forbid"`), so
+the run exits 3 with ingest rejected (HTTP 422).
+
 ## CLI
 
 ```
 loopboard sync kanban --config PATH [--board SLUG] [--cli-replay DIR] [--dry-run]
 loopboard sync github --config PATH [--dry-run]
+loopboard sync asks --config PATH [--dry-run]
 ```
 
 It prints one JSON summary line, for example
-`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"unknown_epic":0,"linked_task":0,"auto_tasks":0,"unknown_task":0,"posts":1,"dry_run":false}`.
+`{"connector":"kanban","collected":8,"accepted":8,"created":8,"updated":0,"skipped_older":0,"unknown_epic":0,"linked_task":0,"auto_tasks":0,"unknown_task":0,"ask_tasks":0,"posts":1,"dry_run":false}`.
 `--cli-replay DIR` reads `list.json` and `show-<id>.json` from DIR instead of calling `hermes`.
 `--dry-run` collects and maps but posts nothing and needs no token.
 
@@ -151,5 +206,9 @@ It prints one JSON summary line, for example
 - `[general] human`: name used in `human:<human>` (for example `owner`).
 - `[kanban] board`: optional Hermes board slug.
 - `[kanban.tenants]`: Hermes tenant to project key (for example `demo = "DEMO"`).
+- `[asks] file`: path of the asks file; a relative path is relative to the config file.
+- `[asks] source`: ingest source name (default `asks`).
+- `[asks] default_project`: project key for asks whose project is empty or unmapped (required).
+- `[asks.projects]`: project name to project key (for example `"demo app" = "DEMO"`).
 
 `config.toml` is git-ignored; copy `connectors/config.example.toml`.

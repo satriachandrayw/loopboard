@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local stack check for v1a and tasks. Exits 0 only when every check passes.
+# Local stack check for v1a, tasks and the asks connector. Exits 0 only when every check passes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LB_TMP="${LB_TMP_DIR:-/tmp/lb-uv-$(id -u)}"
@@ -70,6 +70,7 @@ mk_token() { # mk_token <name> <scopes> [source] -> sets TOKEN_OUT, inserts row
 }
 mk_token acceptance-rw read,write; RW="$TOKEN_OUT"
 mk_token acceptance-ingest ingest kanban; export LB_INGEST_TOKEN="$TOKEN_OUT"
+mk_token acceptance-asks ingest asks; export LB_ASKS_TOKEN="$TOKEN_OUT"
 ok "tokens created"
 
 echo "== dev server"
@@ -246,6 +247,51 @@ assert row[0]["reply_code"] == "ship DEMO", row[0]
 assert all(r.get("question") and r.get("ask_kind") for r in rows), rows
 PY
 then ok "9 GET /api/needs-you row for $ASK_KEY carries question and ask_kind"; else fail "9 needs-you row question"; fi
+set -e
+
+# 10: asks connector. An open ask becomes its own Needs you row with its reply code; closed, it leaves.
+set +e
+cat >"$TMP/asks.toml" <<CFG
+[loopboard]
+url = "$BASE"
+token_env = "LB_ASKS_TOKEN"
+
+[general]
+human = "owner"
+
+[asks]
+file = "$TMP/asks.json"
+default_project = "DEMO"
+
+[asks.projects]
+"demo app" = "DEMO"
+CFG
+write_ask() { # write_ask <status> <seconds ago>
+  python3 -c "import json,sys,time; json.dump({'asks':[{'code':'D-1','question':'Ship the acceptance ask?','project':'Demo App','status':sys.argv[1],'updated_at':int(time.time())-int(sys.argv[2]),'url':None}]}, open(sys.argv[3],'w'))" "$1" "$2" "$TMP/asks.json"
+}
+sync_asks() { (cd "$ROOT/connectors" && uv run --python 3.13 loopboard sync asks --config "$TMP/asks.toml" | tail -1); }
+needs_ask() { # needs_ask <want 1|0>: is there a Needs you row with reply_code D-1?
+  api GET /api/needs-you | sed '$d' >"$TMP/needs-asks.json"
+  python3 - "$TMP/needs-asks.json" "$1" <<'PY'
+import json, sys
+rows = [r for r in json.load(open(sys.argv[1])) if r.get("reply_code") == "D-1"]
+if sys.argv[2] == "1":
+    assert len(rows) == 1 and rows[0]["question"] == "Ship the acceptance ask?" and rows[0]["ask_kind"] == "decide", rows
+else:
+    assert rows == [], rows
+PY
+}
+write_ask open 120
+SUMMARY="$(sync_asks)"
+echo "     asks sync summary: $SUMMARY"
+[ "$(printf '%s' "$SUMMARY" | jget "d['ask_tasks']" 2>/dev/null)" = 1 ] \
+  && ok "10 sync asks: open ask -> ask_tasks == 1" || fail "10 sync asks open -> $SUMMARY"
+check "10 GET /api/needs-you has the ask row with reply_code D-1" needs_ask 1
+write_ask resolved 30
+SUMMARY="$(sync_asks)"
+[ "$(printf '%s' "$SUMMARY" | jget "d['updated']" 2>/dev/null)" = 1 ] \
+  && ok "10 sync asks: resolved ask -> updated == 1" || fail "10 sync asks resolved -> $SUMMARY"
+check "10 GET /api/needs-you no longer has the ask row" needs_ask 0
 set -e
 
 code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/board")"
